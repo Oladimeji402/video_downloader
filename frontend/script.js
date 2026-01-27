@@ -6,7 +6,8 @@
 // ===========================================
 // Configuration
 // ===========================================
-const API_BASE = "http://localhost:4000/api";
+// Auto-detect API base URL (works for localhost and production)
+const API_BASE = window.location.origin + "/api";
 const POLL_INTERVAL = 1000; // 1 second
 
 // ===========================================

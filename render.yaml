@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: videoframer
+    env: node
+    plan: free
+    buildCommand: cd backend && npm install
+    startCommand: cd backend && npm start
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: NODE_ENV
+        value: production
+    # Note: FFmpeg and yt-dlp need to be installed via buildpack or Dockerfile
+    # For Render, you may need to use a Dockerfile instead

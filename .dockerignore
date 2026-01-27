@@ -1,0 +1,12 @@
+node_modules
+npm-debug.log
+.git
+.gitignore
+README.md
+DEPLOYMENT.md
+*.md
+.env
+.env.local
+temp/
+backend/temp/
+**/temp/

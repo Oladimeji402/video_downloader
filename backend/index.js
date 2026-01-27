@@ -1,11 +1,23 @@
 import express from "express";
 import cors from "cors";
 import path from "path";
+import fs from "fs";
 import { fileURLToPath } from "url";
 import videoRoutes from "./routes/video.routes.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Ensure temp directories exist
+const tempDir = path.join(__dirname, "temp");
+const downloadsDir = path.join(tempDir, "downloads");
+const renderedDir = path.join(tempDir, "rendered");
+
+[tempDir, downloadsDir, renderedDir].forEach(dir => {
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+});
 
 const app = express();
 const PORT = process.env.PORT || 4000;
