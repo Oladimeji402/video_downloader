@@ -213,7 +213,7 @@ function renderFrameOptions() {
     option.dataset.frame = frame.id;
     option.innerHTML = `
       <div class="frame-thumb">
-        <img src="${API_BASE}${frame.path}" alt="${frame.name}" />
+        <img src="${window.location.origin}${frame.path}" alt="${frame.name}" />
       </div>
       <span>${frame.name}</span>
     `;
@@ -261,7 +261,7 @@ function updateFramePreview(frameId) {
     // Image frame
     const frame = state.frames.find((f) => f.id === frameId);
     if (frame) {
-      overlay.style.backgroundImage = `url(${API_BASE}${frame.path})`;
+      overlay.style.backgroundImage = `url(${window.location.origin}${frame.path})`;
     }
   }
 }
