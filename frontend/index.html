@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Video Framer — Add Frames to Social Videos</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="background-pattern"></div>
+  
+  <main class="app">
+    <header class="header">
+      <div class="logo">
+        <span class="logo-icon">◈</span>
+        <span class="logo-text">VideoFramer</span>
+      </div>
+      <p class="tagline">Add beautiful frames to TikTok & Instagram videos</p>
+    </header>
+
+    <section class="card input-section">
+      <h2 class="section-title">
+        <span class="step-badge">1</span>
+        Paste Video URL
+      </h2>
+      
+      <div class="input-group">
+        <input
+          id="videoUrl"
+          type="text"
+          placeholder="https://www.tiktok.com/... or https://www.instagram.com/..."
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <button id="actionBtn" class="btn btn-secondary" type="button">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+          </svg>
+          <span>Paste</span>
+        </button>
+      </div>
+
+      <button id="previewBtn" class="btn btn-primary btn-full" type="button">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polygon points="5 3 19 12 5 21 5 3"></polygon>
+        </svg>
+        <span>Fetch & Preview</span>
+      </button>
+
+      <!-- Status indicator -->
+      <div id="fetchStatus" class="status-bar hidden">
+        <div class="status-content">
+          <div class="spinner"></div>
+          <span id="fetchStatusText">Fetching video...</span>
+        </div>
+        <div class="progress-bar">
+          <div id="fetchProgress" class="progress-fill"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Preview Section (hidden by default) -->
+    <section id="previewSection" class="card preview-section hidden">
+      <h2 class="section-title">
+        <span class="step-badge">2</span>
+        Preview & Select Frame
+      </h2>
+
+      <div class="preview-container">
+        <div id="framePreview" class="frame-preview">
+          <video id="videoPlayer" controls playsinline></video>
+          <div id="frameOverlay" class="frame-overlay"></div>
+        </div>
+      </div>
+
+      <div class="frame-selector">
+        <h3 class="subsection-title">Choose a Frame</h3>
+        <div id="frameOptions" class="frame-options">
+          <!-- Frame options will be populated dynamically -->
+          <button class="frame-option selected" data-frame="none">
+            <div class="frame-thumb no-frame">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"></line>
+              </svg>
+            </div>
+            <span>No Frame</span>
+          </button>
+        </div>
+        <p id="noFramesMsg" class="no-frames-msg hidden">
+          No frame templates found. Add PNG frames to the <code>backend/frames</code> folder.
+        </p>
+      </div>
+    </section>
+
+    <!-- Download Section (hidden by default) -->
+    <section id="downloadSection" class="card download-section hidden">
+      <h2 class="section-title">
+        <span class="step-badge">3</span>
+        Download Your Video
+      </h2>
+
+      <button id="downloadBtn" class="btn btn-accent btn-full" type="button">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+          <polyline points="7 10 12 15 17 10"></polyline>
+          <line x1="12" y1="15" x2="12" y2="3"></line>
+        </svg>
+        <span>Download Framed Video</span>
+      </button>
+
+      <!-- Render status -->
+      <div id="renderStatus" class="status-bar hidden">
+        <div class="status-content">
+          <div class="spinner"></div>
+          <span id="renderStatusText">Rendering video...</span>
+        </div>
+        <div class="progress-bar">
+          <div id="renderProgress" class="progress-fill"></div>
+        </div>
+      </div>
+
+      <p class="download-note">
+        Your video will be processed with the selected frame overlay using FFmpeg.
+      </p>
+    </section>
+
+    <footer class="footer">
+      <p>Built with ❤️ using Node.js + FFmpeg</p>
+    </footer>
+  </main>
+
+  <!-- Toast notifications -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <script src="script.js"></script>
+</body>
+</html>
