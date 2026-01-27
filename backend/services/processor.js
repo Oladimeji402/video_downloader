@@ -128,12 +128,13 @@ export function startRender(videoPath, frameId) {
 
     // FFmpeg command to overlay frame on video
     // The frame image will be scaled to match video dimensions
+    // Optimized for Render free tier: using ultrafast preset for speed
     ffmpeg()
       .input(videoPath)
       .input(framePath)
       .complexFilter([
-        // Scale frame to match video size
-        `[1:v]scale=${width}:${height}[frame]`,
+        // Scale frame to match video size (using fast bilinear algorithm)
+        `[1:v]scale=${width}:${height}:flags=fast_bilinear[frame]`,
         // Overlay frame on top of video
         `[0:v][frame]overlay=0:0[out]`
       ])
@@ -141,11 +142,15 @@ export function startRender(videoPath, frameId) {
         "-map", "[out]",
         "-map", "0:a?", // Include audio if present
         "-c:v", "libx264",
-        "-preset", "medium",
+        "-preset", "ultrafast", // Changed from "medium" to "ultrafast" for speed
         "-crf", "23",
-        "-c:a", "aac",
-        "-b:a", "128k",
+        "-c:a", "aac", // Audio encoding
+        "-b:a", "128k", // Audio bitrate
+        "-ar", "44100", // Audio sample rate
+        "-ac", "2", // Stereo audio
         "-movflags", "+faststart",
+        "-threads", "0", // Use all available CPU threads
+        "-tune", "fastdecode", // Optimize for fast decoding
       ])
       .output(outputPath)
       .on("start", (cmd) => {
