@@ -96,15 +96,13 @@ This guide will help you deploy VideoFramer to free hosting platforms so your bo
    - Select "Deploy from GitHub repo"
    - Choose your repository
 
-4. **Configure Service:**
-   - Railway will auto-detect Node.js
-   - **Root Directory:** Set to `backend` if needed
-   - **Build Command:** `npm install`
-   - **Start Command:** `npm start`
-
-5. **Add Buildpack/Setup:**
-   - Go to Settings → Add Buildpack
-   - Add: `apt-get update && apt-get install -y ffmpeg python3-pip && pip3 install yt-dlp`
+4. **Configure Service for Docker:**
+   - Railway should auto-detect the Dockerfile
+   - If it doesn't, go to **Settings** → **Service** → **Source**
+   - Make sure **Dockerfile Path** is set to `Dockerfile`
+   - **IMPORTANT:** Do NOT set a custom Start Command in Railway settings
+   - The Dockerfile CMD will handle the start command automatically
+   - Remove any Start Command if Railway auto-detected Node.js (this causes the `cd` error)
 
 6. **Environment Variables:**
    - `PORT`: Railway sets this automatically

@@ -1,0 +1,13 @@
+# Nixpacks configuration for Railway
+# This tells Railway to use Docker instead of auto-detecting Node.js
+[phases.setup]
+nixPkgs = []
+
+[phases.install]
+cmds = []
+
+[phases.build]
+cmds = []
+
+[start]
+cmd = "node index.js"
