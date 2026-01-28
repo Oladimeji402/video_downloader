@@ -2,6 +2,7 @@ import express from "express";
 import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
+import multer from "multer";
 import downloader from "../services/downloader.js";
 import processor from "../services/processor.js";
 
@@ -9,6 +10,36 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const router = express.Router();
+
+// Configure multer for file uploads
+const uploadsDir = path.join(__dirname, "..", "temp", "uploads");
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => {
+      cb(null, uploadsDir);
+    },
+    filename: (req, file, cb) => {
+      // Use timestamp to avoid conflicts
+      const timestamp = Date.now();
+      cb(null, `${timestamp}-${file.originalname}`);
+    },
+  }),
+  limits: {
+    fileSize: 500 * 1024 * 1024, // 500MB
+  },
+  fileFilter: (req, file, cb) => {
+    // Only accept video files
+    if (file.mimetype.startsWith("video/")) {
+      cb(null, true);
+    } else {
+      cb(new Error("Only video files are allowed"));
+    }
+  },
+});
 
 // Frames directory path
 const FRAMES_DIR = path.join(__dirname, "..", "frames");
@@ -62,6 +93,43 @@ router.post("/resolve", (req, res) => {
     res.status(500).json({
       success: false,
       error: "Failed to start download",
+    });
+  }
+});
+
+/**
+ * POST /api/video/upload
+ * Handle video file upload
+ */
+router.post("/upload", upload.single("file"), (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        error: "No file provided",
+      });
+    }
+
+    const result = downloader.handleUploadedFile(req.file);
+
+    if (result.error) {
+      return res.status(400).json({
+        success: false,
+        error: result.error,
+      });
+    }
+
+    res.json({
+      success: true,
+      videoId: result.videoId,
+      status: result.status,
+      message: "File uploaded successfully",
+    });
+  } catch (err) {
+    console.error("Upload error:", err);
+    res.status(500).json({
+      success: false,
+      error: "Failed to upload file: " + err.message,
     });
   }
 });

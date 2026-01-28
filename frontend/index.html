@@ -24,26 +24,72 @@
     <section class="card input-section">
       <h2 class="section-title">
         <span class="step-badge">1</span>
-        Paste Video URL
+        Add Your Video
       </h2>
       
-      <div class="input-group">
-        <input
-          id="videoUrl"
-          type="text"
-          placeholder="https://www.tiktok.com/... or https://www.instagram.com/..."
-          autocomplete="off"
-          spellcheck="false"
-        />
-        <button id="actionBtn" class="btn btn-secondary" type="button">
+      <!-- Tab Navigation -->
+      <div class="tab-navigation">
+        <button id="urlTab" class="tab-button tab-active" data-tab="url-tab">
           <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
           </svg>
-          <span>Paste</span>
+          <span>URL</span>
+        </button>
+        <button id="uploadTab" class="tab-button" data-tab="upload-tab">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="17 8 12 3 7 8"></polyline>
+            <line x1="12" y1="3" x2="12" y2="15"></line>
+          </svg>
+          <span>Upload</span>
         </button>
       </div>
 
+      <!-- URL Tab Content -->
+      <div id="url-tab" class="tab-content tab-active">
+        <div class="input-group">
+          <input
+            id="videoUrl"
+            type="text"
+            placeholder="https://www.tiktok.com/... or https://www.instagram.com/..."
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <button id="actionBtn" class="btn btn-secondary" type="button">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+            <span>Paste</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Upload Tab Content -->
+      <div id="upload-tab" class="tab-content">
+        <div class="upload-area" id="uploadArea">
+          <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="17 8 12 3 7 8"></polyline>
+            <line x1="12" y1="3" x2="12" y2="15"></line>
+          </svg>
+          <p class="upload-text">Drag and drop your video here</p>
+          <p class="upload-subtext">or</p>
+          <button id="uploadFileBtn" class="btn btn-secondary btn-small" type="button">
+            Browse Files
+          </button>
+          <p class="upload-hint">Supports MP4, MOV, AVI, WebM (max 500MB)</p>
+          <input
+            id="fileInput"
+            type="file"
+            accept="video/*"
+            style="display: none"
+          />
+        </div>
+      </div>
+
+      <!-- Preview Button -->
       <button id="previewBtn" class="btn btn-primary btn-full" type="button">
         <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <polygon points="5 3 19 12 5 21 5 3"></polygon>

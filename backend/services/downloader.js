@@ -99,6 +99,56 @@ export function getVideoPath(videoId) {
 }
 
 /**
+ * Handle uploaded video file
+ * @param {object} file - Multer file object
+ * @returns {object} - Job info with videoId
+ */
+export function handleUploadedFile(file) {
+  if (!file) {
+    return { error: "No file provided" };
+  }
+
+  const videoId = uuidv4();
+  const uploadsDir = path.join(__dirname, "..", "temp", "uploads");
+  
+  // Ensure uploads directory exists
+  if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+  }
+
+  const outputPath = path.join(uploadsDir, `${videoId}-${file.originalname}`);
+
+  // Copy uploaded file to outputs directory
+  try {
+    fs.copyFileSync(file.path, outputPath);
+    
+    const job = {
+      videoId,
+      status: "completed",
+      progress: 100,
+      outputPath,
+      error: null,
+      createdAt: Date.now(),
+      isUploaded: true,
+    };
+
+    downloadJobs.set(videoId, job);
+
+    // Clean up the temp multer file
+    try {
+      fs.unlinkSync(file.path);
+    } catch (err) {
+      console.error("Failed to delete temp file:", err);
+    }
+
+    return { videoId, status: "completed" };
+  } catch (err) {
+    console.error("Error handling uploaded file:", err);
+    return { error: err.message };
+  }
+}
+
+/**
  * Clean up old download jobs and files (call periodically)
  * @param {number} maxAgeMs - Maximum age in milliseconds
  */
@@ -125,6 +175,7 @@ setInterval(() => cleanupOldDownloads(), 1800000);
 
 export default {
   startDownload,
+  handleUploadedFile,
   getDownloadStatus,
   getVideoPath,
   cleanupOldDownloads,

@@ -14,10 +14,21 @@ const POLL_INTERVAL = 1000; // 1 second
 // DOM Elements
 // ===========================================
 const elements = {
+  // Tab navigation
+  urlTab: document.getElementById("urlTab"),
+  uploadTab: document.getElementById("uploadTab"),
+  
   // Input section
   videoUrl: document.getElementById("videoUrl"),
   actionBtn: document.getElementById("actionBtn"),
   previewBtn: document.getElementById("previewBtn"),
+  
+  // File upload
+  uploadArea: document.getElementById("uploadArea"),
+  uploadFileBtn: document.getElementById("uploadFileBtn"),
+  fileInput: document.getElementById("fileInput"),
+  
+  // Fetch status
   fetchStatus: document.getElementById("fetchStatus"),
   fetchStatusText: document.getElementById("fetchStatusText"),
   fetchProgress: document.getElementById("fetchProgress"),
@@ -489,9 +500,186 @@ function triggerDownload(url) {
   a.remove();
 }
 
+/**
+ * Switch between tabs
+ */
+function switchTab(tabName) {
+  // Hide all tabs
+  document.querySelectorAll(".tab-content").forEach((tab) => {
+    tab.classList.remove("tab-active");
+  });
+
+  // Deactivate all buttons
+  document.querySelectorAll(".tab-button").forEach((btn) => {
+    btn.classList.remove("tab-active");
+  });
+
+  // Show selected tab
+  const selectedTab = document.getElementById(tabName);
+  if (selectedTab) {
+    selectedTab.classList.add("tab-active");
+  }
+
+  // Activate selected button
+  const selectedBtn = document.querySelector(
+    `.tab-button[data-tab="${tabName}"]`
+  );
+  if (selectedBtn) {
+    selectedBtn.classList.add("tab-active");
+  }
+}
+
+/**
+ * Handle file upload
+ */
+function handleFileUpload(file) {
+  if (!file) return;
+
+  // Validate file type
+  if (!file.type.startsWith("video/")) {
+    showToast("Please select a valid video file", "error");
+    return;
+  }
+
+  // Validate file size (500MB)
+  const maxSize = 500 * 1024 * 1024;
+  if (file.size > maxSize) {
+    showToast("File size exceeds 500MB limit", "error");
+    return;
+  }
+
+  state.isProcessing = true;
+  setButtonLoading(elements.previewBtn, true);
+  elements.fetchProgress.style.width = "0%";
+
+  const formData = new FormData();
+  formData.append("file", file);
+
+  try {
+    // Start the upload
+    fetch(`${API_BASE}/video/upload`, {
+      method: "POST",
+      body: formData,
+    })
+      .then((response) => response.json())
+      .then((data) => {
+        if (!data.success) {
+          throw new Error(data.error || "Failed to upload file");
+        }
+
+        state.videoId = data.videoId;
+        elements.fetchStatusText.textContent = "Processing uploaded video...";
+
+        // Poll for status
+        pollStatus(
+          `/video/status/${data.videoId}`,
+          elements.fetchStatus,
+          elements.fetchStatusText,
+          elements.fetchProgress,
+          // On complete
+          () => {
+            showVideoPreview();
+            showToast("Video uploaded successfully!", "success");
+            state.isProcessing = false;
+            setButtonLoading(
+              elements.previewBtn,
+              false,
+              `
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="5 3 19 12 5 21 5 3"></polygon>
+              </svg>
+              <span>Fetch & Preview</span>
+            `
+            );
+          },
+          // On error
+          (err) => {
+            showToast(
+              err.message || "Failed to process uploaded video",
+              "error"
+            );
+            state.isProcessing = false;
+            setButtonLoading(
+              elements.previewBtn,
+              false,
+              `
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="5 3 19 12 5 21 5 3"></polygon>
+              </svg>
+              <span>Fetch & Preview</span>
+            `
+            );
+          }
+        );
+      })
+      .catch((err) => {
+        console.error("Upload error:", err);
+        showToast(err.message || "Failed to upload file", "error");
+        state.isProcessing = false;
+        setButtonLoading(elements.previewBtn, false);
+        elements.fetchStatus.classList.add("hidden");
+      });
+  } catch (err) {
+    console.error("Upload error:", err);
+    showToast(err.message || "Failed to upload file", "error");
+    state.isProcessing = false;
+    setButtonLoading(elements.previewBtn, false);
+    elements.fetchStatus.classList.add("hidden");
+  }
+}
+
 // ===========================================
 // Event Listeners
 // ===========================================
+
+// Tab navigation
+elements.urlTab.addEventListener("click", () => switchTab("url-tab"));
+elements.uploadTab.addEventListener("click", () => switchTab("upload-tab"));
+
+// File upload - Browse button
+elements.uploadFileBtn.addEventListener("click", (e) => {
+  e.preventDefault();
+  elements.fileInput.click();
+});
+
+// File upload - File input change
+elements.fileInput.addEventListener("change", (e) => {
+  const file = e.target.files[0];
+  if (file) {
+    handleFileUpload(file);
+  }
+});
+
+// Drag and drop
+elements.uploadArea.addEventListener("dragover", (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  elements.uploadArea.classList.add("drag-over");
+});
+
+elements.uploadArea.addEventListener("dragleave", (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  elements.uploadArea.classList.remove("drag-over");
+});
+
+elements.uploadArea.addEventListener("drop", (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  elements.uploadArea.classList.remove("drag-over");
+
+  const files = e.dataTransfer.files;
+  if (files.length > 0) {
+    handleFileUpload(files[0]);
+  }
+});
+
+// Click upload area to open file picker
+elements.uploadArea.addEventListener("click", (e) => {
+  if (e.target === elements.uploadArea || e.target.closest(".upload-area")) {
+    elements.fileInput.click();
+  }
+});
 
 // Paste/Clear button
 elements.actionBtn.addEventListener("click", async (e) => {

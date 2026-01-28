@@ -12,8 +12,9 @@ const __dirname = path.dirname(__filename);
 const tempDir = path.join(__dirname, "temp");
 const downloadsDir = path.join(tempDir, "downloads");
 const renderedDir = path.join(tempDir, "rendered");
+const uploadsDir = path.join(tempDir, "uploads");
 
-[tempDir, downloadsDir, renderedDir].forEach(dir => {
+[tempDir, downloadsDir, renderedDir, uploadsDir].forEach(dir => {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
@@ -25,6 +26,7 @@ const PORT = process.env.PORT || 4000;
 // Middleware
 app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded({ limit: '500mb', extended: true }));
 
 // Serve static files from frontend folder
 app.use(express.static(path.join(__dirname, "..", "frontend")));
@@ -73,6 +75,7 @@ app.listen(PORT, () => {
 ║                                                          ║
 ║  API Endpoints:                                          ║
 ║  - POST /api/video/resolve    - Fetch video from URL     ║
+║  - POST /api/video/upload     - Upload video file        ║
 ║  - GET  /api/video/status/:id - Check download status    ║
 ║  - GET  /api/video/preview/:id- Preview downloaded video ║
 ║  - GET  /api/frames           - List frame templates     ║
