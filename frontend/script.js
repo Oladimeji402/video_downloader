@@ -310,7 +310,12 @@ async function fetchVideo() {
       throw new Error(data.error || "Failed to start download");
     }
 
+    if (!data.videoId) {
+      throw new Error("No videoId returned from server");
+    }
+
     state.videoId = data.videoId;
+    console.log("Download started, videoId:", state.videoId);
     elements.fetchStatusText.textContent = "Fetching video...";
 
     // Poll for download status
@@ -356,12 +361,35 @@ async function fetchVideo() {
  * Show video preview
  */
 function showVideoPreview() {
+  // Validate videoId exists
+  if (!state.videoId) {
+    console.error("Error: videoId is not set");
+    showToast("Error: Video ID missing", "error");
+    return;
+  }
+
   const videoUrl = `${API_BASE}/video/preview/${state.videoId}?t=${Date.now()}`;
   
-  // Reset video player
-  elements.videoPlayer.src = "";
-  elements.videoPlayer.innerHTML = `<source src="${videoUrl}" type="video/mp4">`;
+  console.log("Loading video from:", videoUrl);
+  console.log("API_BASE:", API_BASE);
+  console.log("videoId:", state.videoId);
+  
+  // Clear and reset video player completely
+  elements.videoPlayer.innerHTML = "";
+  
+  // Create source element properly
+  const sourceEl = document.createElement("source");
+  sourceEl.src = videoUrl;
+  sourceEl.type = "video/mp4";
+  
+  // Append source to video element
+  elements.videoPlayer.appendChild(sourceEl);
+  
+  // Set load behavior
+  elements.videoPlayer.preload = "metadata";
   elements.videoPlayer.load();
+  
+  console.log("Video player HTML:", elements.videoPlayer.outerHTML);
   
   // Add error handler for video playback issues
   elements.videoPlayer.onerror = async (e) => {
@@ -369,7 +397,7 @@ function showVideoPreview() {
     let errorMsg = "Failed to load video";
     
     if (error) {
-      console.error("Video error:", error.code, error.message);
+      console.error("Video error code:", error.code, "message:", error.message);
       switch(error.code) {
         case error.MEDIA_ERR_ABORTED:
           errorMsg = "Video loading aborted";
@@ -383,6 +411,8 @@ function showVideoPreview() {
         case error.MEDIA_ERR_SRC_NOT_SUPPORTED:
           errorMsg = "Video format not supported";
           break;
+        default:
+          errorMsg = `Video error (code ${error.code})`;
       }
     }
     
@@ -391,7 +421,7 @@ function showVideoPreview() {
       const debugRes = await fetch(`${API_BASE}/video/debug/${state.videoId}`);
       const debugData = await debugRes.json();
       console.error("Debug info:", debugData);
-      console.error("Video URL:", videoUrl);
+      console.error("Expected URL:", videoUrl);
     } catch (err) {
       console.error("Failed to fetch debug info:", err);
     }
@@ -618,7 +648,12 @@ function handleFileUpload(file) {
           throw new Error(data.error || "Failed to upload file");
         }
 
+        if (!data.videoId) {
+          throw new Error("No videoId returned from server");
+        }
+
         state.videoId = data.videoId;
+        console.log("Upload successful, videoId:", state.videoId);
         elements.fetchStatusText.textContent = "Processing uploaded video...";
 
         // Poll for status
