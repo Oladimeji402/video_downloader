@@ -116,7 +116,8 @@ export function handleUploadedFile(file) {
     fs.mkdirSync(uploadsDir, { recursive: true });
   }
 
-  const outputPath = path.join(uploadsDir, `${videoId}-${file.originalname}`);
+  // Use a clean filename with just the videoId
+  const outputPath = path.join(uploadsDir, `${videoId}.mp4`);
 
   // Copy uploaded file to outputs directory
   try {
@@ -141,6 +142,7 @@ export function handleUploadedFile(file) {
       console.error("Failed to delete temp file:", err);
     }
 
+    console.log(`Uploaded video stored at: ${outputPath}`);
     return { videoId, status: "completed" };
   } catch (err) {
     console.error("Error handling uploaded file:", err);

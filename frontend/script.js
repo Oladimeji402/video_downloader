@@ -356,14 +356,26 @@ async function fetchVideo() {
  * Show video preview
  */
 function showVideoPreview() {
-  elements.videoPlayer.src = `${API_BASE}/video/preview/${state.videoId}?t=${Date.now()}`;
+  const videoUrl = `${API_BASE}/video/preview/${state.videoId}?t=${Date.now()}`;
+  
+  // Reset video player
+  elements.videoPlayer.src = "";
+  elements.videoPlayer.innerHTML = `<source src="${videoUrl}" type="video/mp4">`;
   elements.videoPlayer.load();
+  
+  // Add error handler for video playback issues
+  elements.videoPlayer.onerror = () => {
+    console.error("Video playback error:", elements.videoPlayer.error);
+    showToast("Failed to load video. Please try again.", "error");
+  };
   
   elements.previewSection.classList.remove("hidden");
   elements.downloadSection.classList.remove("hidden");
 
   // Scroll to preview
-  elements.previewSection.scrollIntoView({ behavior: "smooth", block: "start" });
+  setTimeout(() => {
+    elements.previewSection.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, 100);
 }
 
 /**
@@ -556,12 +568,21 @@ function handleFileUpload(file) {
   formData.append("file", file);
 
   try {
+    // Show status bar
+    elements.fetchStatus.classList.remove("hidden");
+    elements.fetchStatusText.textContent = "Uploading video...";
+
     // Start the upload
     fetch(`${API_BASE}/video/upload`, {
       method: "POST",
       body: formData,
     })
-      .then((response) => response.json())
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`Upload failed with status ${response.status}`);
+        }
+        return response.json();
+      })
       .then((data) => {
         if (!data.success) {
           throw new Error(data.error || "Failed to upload file");

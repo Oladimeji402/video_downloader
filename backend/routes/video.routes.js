@@ -23,9 +23,11 @@ const upload = multer({
       cb(null, uploadsDir);
     },
     filename: (req, file, cb) => {
-      // Use timestamp to avoid conflicts
+      // Use a UUID-based filename to avoid conflicts
       const timestamp = Date.now();
-      cb(null, `${timestamp}-${file.originalname}`);
+      const random = Math.random().toString(36).substring(7);
+      const ext = file.mimetype.split("/")[1] === "quicktime" ? "mov" : "mp4";
+      cb(null, `${timestamp}-${random}.${ext}`);
     },
   }),
   limits: {
@@ -33,7 +35,7 @@ const upload = multer({
   },
   fileFilter: (req, file, cb) => {
     // Only accept video files
-    if (file.mimetype.startsWith("video/")) {
+    if (file.mimetype.startsWith("video/") || file.mimetype === "application/octet-stream") {
       cb(null, true);
     } else {
       cb(new Error("Only video files are allowed"));
@@ -163,46 +165,64 @@ router.get("/status/:videoId", (req, res) => {
  * Stream the downloaded video for preview
  */
 router.get("/preview/:videoId", (req, res) => {
-  const { videoId } = req.params;
-  const videoPath = downloader.getVideoPath(videoId);
+  try {
+    const { videoId } = req.params;
+    const videoPath = downloader.getVideoPath(videoId);
 
-  if (!videoPath) {
-    return res.status(404).json({
+    if (!videoPath) {
+      console.warn(`Video not found for ID: ${videoId}`);
+      return res.status(404).json({
+        success: false,
+        error: "Video not found or still downloading",
+      });
+    }
+
+    // Check if file exists
+    if (!fs.existsSync(videoPath)) {
+      console.error(`File not found at path: ${videoPath}`);
+      return res.status(404).json({
+        success: false,
+        error: "Video file not found",
+      });
+    }
+
+    // Get file stats for range requests
+    const stat = fs.statSync(videoPath);
+    const fileSize = stat.size;
+    const range = req.headers.range;
+
+    if (range) {
+      // Handle range requests for video seeking
+      const parts = range.replace(/bytes=/, "").split("-");
+      const start = parseInt(parts[0], 10);
+      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+      const chunkSize = end - start + 1;
+
+      const file = fs.createReadStream(videoPath, { start, end });
+      
+      res.writeHead(206, {
+        "Content-Range": `bytes ${start}-${end}/${fileSize}`,
+        "Accept-Ranges": "bytes",
+        "Content-Length": chunkSize,
+        "Content-Type": "video/mp4",
+      });
+      
+      file.pipe(res);
+    } else {
+      // Send entire file
+      res.writeHead(200, {
+        "Content-Length": fileSize,
+        "Content-Type": "video/mp4",
+      });
+      
+      fs.createReadStream(videoPath).pipe(res);
+    }
+  } catch (err) {
+    console.error("Preview endpoint error:", err);
+    res.status(500).json({
       success: false,
-      error: "Video not found or still downloading",
+      error: "Failed to stream video: " + err.message,
     });
-  }
-
-  // Get file stats for range requests
-  const stat = fs.statSync(videoPath);
-  const fileSize = stat.size;
-  const range = req.headers.range;
-
-  if (range) {
-    // Handle range requests for video seeking
-    const parts = range.replace(/bytes=/, "").split("-");
-    const start = parseInt(parts[0], 10);
-    const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
-    const chunkSize = end - start + 1;
-
-    const file = fs.createReadStream(videoPath, { start, end });
-    
-    res.writeHead(206, {
-      "Content-Range": `bytes ${start}-${end}/${fileSize}`,
-      "Accept-Ranges": "bytes",
-      "Content-Length": chunkSize,
-      "Content-Type": "video/mp4",
-    });
-    
-    file.pipe(res);
-  } else {
-    // Send entire file
-    res.writeHead(200, {
-      "Content-Length": fileSize,
-      "Content-Type": "video/mp4",
-    });
-    
-    fs.createReadStream(videoPath).pipe(res);
   }
 });
 
