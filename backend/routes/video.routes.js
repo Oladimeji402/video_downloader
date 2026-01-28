@@ -151,12 +151,29 @@ router.get("/status/:videoId", (req, res) => {
     });
   }
 
+  // If completed, check if file actually exists and get size
+  let fileSize = null;
+  if (status.status === "completed" && status.outputPath) {
+    try {
+      if (fs.existsSync(status.outputPath)) {
+        fileSize = fs.statSync(status.outputPath).size;
+        console.log(`Video ${videoId}: ${fileSize} bytes`);
+      } else {
+        console.error(`Video file missing for ${videoId}: ${status.outputPath}`);
+      }
+    } catch (err) {
+      console.error(`Error checking file for ${videoId}:`, err);
+    }
+  }
+
   res.json({
     success: true,
     videoId: status.videoId,
     status: status.status,
     progress: status.progress,
     error: status.error,
+    fileSize: fileSize,
+    isUploaded: status.isUploaded || false,
   });
 });
 
@@ -189,7 +206,26 @@ router.get("/preview/:videoId", (req, res) => {
     // Get file stats for range requests
     const stat = fs.statSync(videoPath);
     const fileSize = stat.size;
+    
+    // Check if file is valid
+    if (fileSize === 0) {
+      console.error(`Video file is empty: ${videoPath}`);
+      return res.status(400).json({
+        success: false,
+        error: "Video file is empty or corrupted",
+      });
+    }
+
     const range = req.headers.range;
+
+    // Set common headers for all responses
+    const headers = {
+      "Accept-Ranges": "bytes",
+      "Content-Type": "video/mp4",
+      "Cache-Control": "no-cache, no-store, must-revalidate",
+      "Pragma": "no-cache",
+      "Expires": "0",
+    };
 
     if (range) {
       // Handle range requests for video seeking
@@ -198,24 +234,49 @@ router.get("/preview/:videoId", (req, res) => {
       const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
       const chunkSize = end - start + 1;
 
+      console.log(`Range request: bytes ${start}-${end}/${fileSize}`);
+
       const file = fs.createReadStream(videoPath, { start, end });
       
       res.writeHead(206, {
+        ...headers,
         "Content-Range": `bytes ${start}-${end}/${fileSize}`,
-        "Accept-Ranges": "bytes",
         "Content-Length": chunkSize,
-        "Content-Type": "video/mp4",
+      });
+      
+      file.on("error", (err) => {
+        console.error("Stream error:", err);
+        if (!res.headersSent) {
+          res.status(500).json({
+            success: false,
+            error: "Error streaming video",
+          });
+        }
       });
       
       file.pipe(res);
     } else {
       // Send entire file
+      console.log(`Full video request: ${fileSize} bytes`);
+      
       res.writeHead(200, {
+        ...headers,
         "Content-Length": fileSize,
-        "Content-Type": "video/mp4",
       });
       
-      fs.createReadStream(videoPath).pipe(res);
+      const file = fs.createReadStream(videoPath);
+      
+      file.on("error", (err) => {
+        console.error("Stream error:", err);
+        if (!res.headersSent) {
+          res.status(500).json({
+            success: false,
+            error: "Error streaming video",
+          });
+        }
+      });
+      
+      file.pipe(res);
     }
   } catch (err) {
     console.error("Preview endpoint error:", err);
@@ -348,6 +409,52 @@ router.get("/download/:jobId", (req, res) => {
         });
       }
     }
+  });
+});
+
+/**
+ * GET /api/video/debug/:videoId
+ * Debug endpoint to check video file status
+ */
+router.get("/debug/:videoId", (req, res) => {
+  const { videoId } = req.params;
+  const status = downloader.getDownloadStatus(videoId);
+  
+  if (!status) {
+    return res.json({
+      videoId,
+      found: false,
+      error: "Video not found in memory",
+    });
+  }
+
+  let fileInfo = null;
+  if (status.outputPath && fs.existsSync(status.outputPath)) {
+    try {
+      const stat = fs.statSync(status.outputPath);
+      fileInfo = {
+        path: status.outputPath,
+        size: stat.size,
+        exists: true,
+        mtime: stat.mtime,
+      };
+    } catch (err) {
+      fileInfo = {
+        path: status.outputPath,
+        exists: false,
+        error: err.message,
+      };
+    }
+  }
+
+  res.json({
+    videoId,
+    status: status.status,
+    progress: status.progress,
+    isUploaded: status.isUploaded || false,
+    createdAt: new Date(status.createdAt).toISOString(),
+    file: fileInfo,
+    error: status.error,
   });
 });
 

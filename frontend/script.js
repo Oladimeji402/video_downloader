@@ -364,9 +364,39 @@ function showVideoPreview() {
   elements.videoPlayer.load();
   
   // Add error handler for video playback issues
-  elements.videoPlayer.onerror = () => {
-    console.error("Video playback error:", elements.videoPlayer.error);
-    showToast("Failed to load video. Please try again.", "error");
+  elements.videoPlayer.onerror = async (e) => {
+    const error = elements.videoPlayer.error;
+    let errorMsg = "Failed to load video";
+    
+    if (error) {
+      console.error("Video error:", error.code, error.message);
+      switch(error.code) {
+        case error.MEDIA_ERR_ABORTED:
+          errorMsg = "Video loading aborted";
+          break;
+        case error.MEDIA_ERR_NETWORK:
+          errorMsg = "Network error loading video";
+          break;
+        case error.MEDIA_ERR_DECODE:
+          errorMsg = "Video codec not supported or file corrupted";
+          break;
+        case error.MEDIA_ERR_SRC_NOT_SUPPORTED:
+          errorMsg = "Video format not supported";
+          break;
+      }
+    }
+    
+    // Get debug info
+    try {
+      const debugRes = await fetch(`${API_BASE}/video/debug/${state.videoId}`);
+      const debugData = await debugRes.json();
+      console.error("Debug info:", debugData);
+      console.error("Video URL:", videoUrl);
+    } catch (err) {
+      console.error("Failed to fetch debug info:", err);
+    }
+    
+    showToast(errorMsg + ". Check console for details.", "error");
   };
   
   elements.previewSection.classList.remove("hidden");
