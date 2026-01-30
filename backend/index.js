@@ -4,6 +4,8 @@ import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
 import videoRoutes from "./routes/video.routes.js";
+import RateLimiter from "./services/rateLimiter.js";
+import FileCleanupService from "./services/fileCleanup.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -23,6 +25,29 @@ const uploadsDir = path.join(tempDir, "uploads");
 const app = express();
 const PORT = process.env.PORT || 4000;
 
+// Initialize rate limiter (20 requests per hour)
+const rateLimiter = new RateLimiter({
+  maxRequests: 20,
+  windowMs: 60 * 60 * 1000, // 1 hour
+});
+
+// Initialize file cleanup service (cleanup every 5 minutes, delete files older than 5 minutes)
+const fileCleanup = new FileCleanupService({
+  dirs: [downloadsDir, renderedDir, uploadsDir],
+  maxAgeMs: 5 * 60 * 1000, // 5 minutes
+  intervalMs: 5 * 60 * 1000, // Check every 5 minutes
+});
+
+// Start file cleanup service
+fileCleanup.start();
+
+// Cleanup on shutdown
+process.on("SIGINT", () => {
+  console.log("\nShutting down...");
+  fileCleanup.stop();
+  process.exit(0);
+});
+
 // Middleware
 app.use(cors());
 app.use(express.json());
@@ -30,6 +55,23 @@ app.use(express.urlencoded({ limit: '500mb', extended: true }));
 
 // Serve static files from frontend folder
 app.use(express.static(path.join(__dirname, "..", "frontend")));
+
+// Rate limiting middleware for video endpoints
+app.use("/api/video", (req, res, next) => {
+  const ip = req.ip || req.connection.remoteAddress || "unknown";
+  
+  if (!rateLimiter.isAllowed(ip)) {
+    const resetTime = rateLimiter.getResetTime(ip);
+    return res.status(429).json({
+      success: false,
+      error: "Too many requests. Rate limit: 20 videos per hour.",
+      retryAfter: resetTime,
+      retryAfterSeconds: resetTime,
+    });
+  }
+  
+  next();
+});
 
 // API Routes
 app.use("/api/video", videoRoutes);

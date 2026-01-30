@@ -642,9 +642,17 @@ async function shareVideo() {
 
     // Fetch the video as a blob
     const response = await fetch(videoUrl);
-    if (!response.ok) throw new Error("Failed to fetch video");
+    if (!response.ok) {
+      console.error(`Failed to fetch video: ${response.status} ${response.statusText}`);
+      throw new Error(`Failed to fetch video: ${response.status}`);
+    }
     
     videoBlob = await response.blob();
+    console.log(`Video blob fetched: ${videoBlob.size} bytes`);
+    
+    if (videoBlob.size === 0) {
+      throw new Error("Video blob is empty");
+    }
     
     // Check if Web Share API is supported
     if (navigator.share && navigator.canShare) {
@@ -659,8 +667,17 @@ async function shareVideo() {
       };
 
       if (navigator.canShare(shareData)) {
-        await navigator.share(shareData);
-        showToast("Video shared successfully!", "success");
+        try {
+          await navigator.share(shareData);
+          showToast("Video shared successfully!", "success");
+          console.log("Video shared via Web Share API");
+        } catch (shareErr) {
+          if (shareErr.name !== "AbortError") {
+            console.error("Share failed:", shareErr);
+            // Fallback to download if share fails
+            showToast("Share cancelled. Try downloading instead.", "info");
+          }
+        }
       } else {
         throw new Error("Cannot share video files on this device");
       }
@@ -695,10 +712,10 @@ async function shareToWhatsApp() {
 
   // If a frame is selected and not yet rendered, render it first
   if (state.selectedFrame !== "none" && !state.lastRenderedJobId) {
-    showToast("Rendering video with frame...", "info");
+    showToast("Rendering video with frame... Please wait", "info");
     const rendered = await renderVideoForSharing();
     if (!rendered) {
-      showToast("Failed to render video", "error");
+      showToast("Failed to render video. Check console for details", "error");
       return;
     }
   }
@@ -736,10 +753,10 @@ async function copyVideoLink() {
 
   // If a frame is selected and not yet rendered, render it first
   if (state.selectedFrame !== "none" && !state.lastRenderedJobId) {
-    showToast("Rendering video with frame...", "info");
+    showToast("Rendering video with frame... Please wait", "info");
     const rendered = await renderVideoForSharing();
     if (!rendered) {
-      showToast("Failed to render video", "error");
+      showToast("Failed to render video. Check console for details", "error");
       return;
     }
   }
@@ -763,6 +780,7 @@ async function renderVideoForSharing() {
   }
 
   try {
+    console.log("Starting render for sharing...");
     // Start the render
     const response = await fetch(`${API_BASE}/video/render`, {
       method: "POST",
@@ -773,43 +791,72 @@ async function renderVideoForSharing() {
       }),
     });
 
+    if (!response.ok) {
+      throw new Error(`Render request failed with status ${response.status}`);
+    }
+
     const data = await response.json();
+    console.log("Render started:", data);
 
     if (!data.success) {
       throw new Error(data.error || "Failed to start render");
     }
 
-    // Poll for render completion
+    const jobId = data.jobId;
+    console.log("Polling for job:", jobId);
+
+    // Poll for render completion with exponential backoff
     let pollCount = 0;
     const maxPolls = 300; // 5 minutes max
+    let pollDelay = POLL_INTERVAL;
 
     while (pollCount < maxPolls) {
-      await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL));
+      await new Promise(resolve => setTimeout(resolve, pollDelay));
       
-      const statusResponse = await fetch(`${API_BASE}/video/render/${data.jobId}`);
-      const statusData = await statusResponse.json();
+      try {
+        const statusResponse = await fetch(`${API_BASE}/video/render/${jobId}`);
+        
+        if (!statusResponse.ok) {
+          console.error(`Status check failed: ${statusResponse.status}`);
+          throw new Error(`Status check failed with status ${statusResponse.status}`);
+        }
 
-      if (!statusData.success) {
-        throw new Error(statusData.error || "Render failed");
-      }
+        const statusData = await statusResponse.json();
+        console.log(`Poll ${pollCount + 1}: status = ${statusData.status}, progress = ${statusData.progress}%`);
 
-      if (statusData.status === "completed") {
-        // Store the rendered video info
-        state.lastRenderedJobId = data.jobId;
-        state.lastRenderedUrl = `${API_BASE}/video/download/${data.jobId}`;
-        return true;
-      }
+        if (!statusData.success) {
+          throw new Error(statusData.error || "Render failed");
+        }
 
-      if (statusData.status === "failed") {
-        throw new Error(statusData.error || "Render failed");
+        if (statusData.status === "completed") {
+          // Store the rendered video info
+          state.lastRenderedJobId = jobId;
+          state.lastRenderedUrl = `${API_BASE}/video/download/${jobId}`;
+          console.log("Render completed successfully!");
+          return true;
+        }
+
+        if (statusData.status === "failed") {
+          throw new Error(statusData.error || "Render job failed");
+        }
+
+        // Success but still processing
+        if (statusData.status === "processing") {
+          // Keep polling
+          pollDelay = POLL_INTERVAL; // Reset to normal interval
+        }
+      } catch (pollErr) {
+        console.error(`Poll error: ${pollErr.message}`);
+        // Continue polling on errors
       }
 
       pollCount++;
     }
 
-    throw new Error("Render timeout");
+    throw new Error("Render timeout after 5 minutes");
   } catch (err) {
     console.error("Render error:", err);
+    showToast(`Render error: ${err.message}`, "error");
     return false;
   }
 }
