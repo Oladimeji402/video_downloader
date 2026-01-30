@@ -186,10 +186,13 @@ body {
   display: flex;
   gap: 0;
   margin-bottom: var(--space-md);
+  width: 100%;
 }
 
-input[type="text"] {
+input[type="text"],
+input[type="url"] {
   flex: 1;
+  width: 100%;
   padding: var(--space-md);
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
@@ -612,31 +615,51 @@ input[type="text"]:focus {
 }
 
 .share-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-md);
+}
+
+.share-buttons-secondary {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: var(--space-sm);
 }
 
 .share-buttons .btn {
-  font-size: 0.85rem;
-  padding: var(--space-sm) var(--space-md);
+  font-size: 0.95rem;
+  padding: var(--space-md) var(--space-lg);
 }
 
 .share-buttons .btn .icon {
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
 }
 
-/* WhatsApp button custom styling */
-#whatsappBtn {
-  color: #25d366;
-  border-color: #25d366;
-}
-
-#whatsappBtn:hover {
+/* WhatsApp primary button - prominent styling */
+.btn-whatsapp {
   background: #25d366;
   color: white;
-  border-color: #25d366;
+  border: none;
+  font-weight: 600;
+  box-shadow: 0 4px 12px rgba(37, 211, 102, 0.3);
+}
+
+.btn-whatsapp:hover:not(:disabled) {
+  background: #1da851;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(37, 211, 102, 0.4);
+}
+
+.btn-whatsapp:active {
+  transform: translateY(0);
+}
+
+/* Secondary share buttons */
+.share-buttons-secondary .btn {
+  font-size: 0.85rem;
+  padding: var(--space-sm) var(--space-md);
 }
 
 .download-divider {
@@ -648,22 +671,12 @@ input[type="text"]:focus {
   text-transform: lowercase;
 }
 
-/* Download Section */
-.download-note {
-  color: var(--text-muted);
-  font-size: 0.85rem;
-  text-align: center;
-  margin-top: var(--space-md);
-}
+/* Download Section - no longer needed */
 
-/* Responsive share buttons for mobile */
+/* Responsive for mobile */
 @media (max-width: 480px) {
-  .share-buttons {
+  .share-buttons-secondary {
     grid-template-columns: 1fr;
-  }
-  
-  .share-buttons .btn {
-    width: 100%;
   }
   
   .input-group {
@@ -734,6 +747,53 @@ input[type="text"]:focus {
 /* Utility Classes */
 .hidden {
   display: none !important;
+}
+
+/* Screen reader only - visually hidden but accessible */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Focus visible states for keyboard navigation */
+:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.2);
+}
+
+.frame-option:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+input:focus-visible {
+  outline: none; /* Handled by border-color change */
+}
+
+/* Reduced motion for users who prefer it */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  
+  .logo-icon {
+    animation: none;
+  }
 }
 
 /* Responsive */

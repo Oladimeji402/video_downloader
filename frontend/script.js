@@ -280,11 +280,28 @@ function renderFrameOptions() {
  */
 function selectFrame(frameId) {
   console.log("Selecting frame:", frameId);
+  
+  // If selecting same frame, do nothing
+  if (state.selectedFrame === frameId) {
+    return;
+  }
+  
   state.selectedFrame = frameId;
   
   // Reset rendered state when changing frames
   state.lastRenderedJobId = null;
   state.lastRenderedUrl = null;
+  
+  // Cancel any in-progress render for the OLD frame
+  // by clearing the flags - the completion handler will check if frame changed
+  state.isAutoRenderInProgress = false;
+  state.pendingRenderKey = null;
+  
+  // Hide any existing render indicator (old render is now stale)
+  const indicator = document.getElementById("renderIndicator");
+  if (indicator) {
+    indicator.style.display = "none";
+  }
 
   // Update UI
   document.querySelectorAll(".frame-option").forEach((opt) => {
@@ -445,9 +462,19 @@ async function autoStartRenderForFrame(frameId) {
       throw new Error(data.error || "Failed to start render");
     }
 
-    // Poll for completion
+    // Poll for completion - but track which frame this render is for
+    const renderingForFrame = frameId;
+    
     pollRenderJob(data.jobId)
       .then((jobId) => {
+        // IMPORTANT: Only accept result if user hasn't switched frames
+        if (state.selectedFrame !== renderingForFrame) {
+          console.log(`Render completed for ${renderingForFrame} but user switched to ${state.selectedFrame}, ignoring`);
+          state.isAutoRenderInProgress = false;
+          state.pendingRenderKey = null;
+          return;
+        }
+        
         console.log("Auto-render completed, jobId:", jobId);
         state.lastRenderedJobId = jobId;
         state.lastRenderedUrl = `${API_BASE}/video/download/${jobId}`;
