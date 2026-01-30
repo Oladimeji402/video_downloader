@@ -68,7 +68,27 @@ let state = {
   lastRenderedJobId: null,
   lastRenderedUrl: null,
   isAutoRenderInProgress: false, // NEW: Prevent duplicate auto-renders
+  pendingRenderKey: null, // Prevent duplicate render requests
 };
+
+// ===========================================
+// URL Validation Helper
+// ===========================================
+const VALID_DOMAINS = [
+  "tiktok.com",
+  "instagram.com",
+  "youtube.com",
+  "youtu.be",
+  "twitter.com",
+  "x.com",
+  "facebook.com",
+  "fb.watch"
+];
+
+function isValidSocialUrl(url) {
+  if (!url || typeof url !== 'string') return false;
+  return VALID_DOMAINS.some(domain => url.includes(domain));
+}
 
 // ===========================================
 // Utility Functions
@@ -204,6 +224,20 @@ async function loadFrames() {
       state.frames = data.frames;
       renderFrameOptions();
       elements.noFramesMsg.classList.add("hidden");
+      
+      // Pre-select first frame for better UX (users usually want a frame)
+      // This means render will start automatically when video loads
+      if (state.frames.length > 0) {
+        state.selectedFrame = state.frames[0].id;
+        // Update UI to show selection
+        setTimeout(() => {
+          const firstFrameOption = document.querySelector(`[data-frame="${state.frames[0].id}"]`);
+          if (firstFrameOption) {
+            document.querySelectorAll(".frame-option").forEach(opt => opt.classList.remove("selected"));
+            firstFrameOption.classList.add("selected");
+          }
+        }, 100);
+      }
     } else {
       elements.noFramesMsg.classList.remove("hidden");
     }
@@ -319,7 +353,16 @@ function updateFramePreview(frameId) {
  * This ensures the framed video is ready when user clicks Share
  */
 async function autoStartRenderForFrame(frameId) {
-  // If already rendering this frame, don't start again
+  // Create unique key for this render request
+  const renderKey = `${state.videoId}-${frameId}`;
+  
+  // If already rendering this exact combination, skip
+  if (state.pendingRenderKey === renderKey) {
+    console.log("Same render already in progress, skipping");
+    return;
+  }
+  
+  // If already rendered this frame, don't start again
   if (state.lastRenderedJobId && state.selectedFrame === frameId) {
     console.log("Frame already rendered, skipping auto-render");
     return;
@@ -339,6 +382,7 @@ async function autoStartRenderForFrame(frameId) {
 
   // Mark as in progress to prevent duplicates
   state.isAutoRenderInProgress = true;
+  state.pendingRenderKey = renderKey;
 
   try {
     console.log("Starting auto-render for frame:", frameId);
@@ -408,6 +452,7 @@ async function autoStartRenderForFrame(frameId) {
         state.lastRenderedJobId = jobId;
         state.lastRenderedUrl = `${API_BASE}/video/download/${jobId}`;
         state.isAutoRenderInProgress = false;
+        state.pendingRenderKey = null;
         
         // Hide render indicator
         const indicator = document.getElementById("renderIndicator");
@@ -420,6 +465,7 @@ async function autoStartRenderForFrame(frameId) {
       .catch((err) => {
         console.error("Auto-render failed:", err);
         state.isAutoRenderInProgress = false;
+        state.pendingRenderKey = null;
         showToast(err.message || "Frame preparation failed (original will be shared)", "warning");
         
         // Hide render indicator
@@ -432,6 +478,7 @@ async function autoStartRenderForFrame(frameId) {
   } catch (err) {
     console.error("Auto-render error:", err);
     state.isAutoRenderInProgress = false;
+    state.pendingRenderKey = null;
     showToast(err.message || "Frame preparation failed", "warning");
     
     // Hide render indicator
@@ -661,6 +708,14 @@ function showVideoPreview() {
   setTimeout(() => {
     elements.previewSection.scrollIntoView({ behavior: "smooth", block: "start" });
   }, 100);
+  
+  // Auto-start rendering if a frame is already selected (from pre-selection)
+  // This ensures framed video is ready by the time user clicks Share
+  if (state.selectedFrame && state.selectedFrame !== "none") {
+    console.log("Video loaded with frame pre-selected, starting auto-render:", state.selectedFrame);
+    updateFramePreview(state.selectedFrame);
+    autoStartRenderForFrame(state.selectedFrame);
+  }
 }
 
 /**
@@ -803,7 +858,9 @@ function triggerDownload(url) {
 
 /**
  * Share video using Web Share API with in-memory Blob
- * Preserves user gesture context for native sharing
+ * IMPROVED: Shares immediately without blocking on render
+ * - If rendered video available: share it
+ * - If not: share original and render in background for next time
  */
 async function shareVideo() {
   if (!state.videoId) {
@@ -811,22 +868,25 @@ async function shareVideo() {
     return;
   }
 
-  // Check if rendering is needed
-  const needsRendering = state.selectedFrame !== "none" && !state.lastRenderedJobId;
-
-  // Determine which video URL to use
+  // Determine which video to share NOW (don't wait for render)
+  // Priority: rendered version > original
   let videoUrl;
+  let isRenderedVersion = false;
+  
   if (state.lastRenderedJobId && state.selectedFrame !== "none") {
+    // Rendered version available - use it
     videoUrl = state.lastRenderedUrl;
+    isRenderedVersion = true;
   } else {
+    // Use original - share immediately, don't block
     videoUrl = `${API_BASE}/video/preview/${state.videoId}`;
   }
 
-  // Show loading modal immediately (before fetching)
-  showShareLoadingModal(needsRendering);
+  // Show brief loading (just for fetch, not render)
+  showShareLoadingModal(false);
 
   try {
-    // Step 1: Fetch the video as a Blob
+    // Fetch video blob quickly
     console.log("Fetching video for sharing:", videoUrl);
     const response = await fetch(videoUrl);
     
@@ -841,34 +901,27 @@ async function shareVideo() {
       throw new Error("Video blob is empty");
     }
 
-    // Step 2: If rendering is needed, start the render in background and show modal
-    if (needsRendering) {
-      console.log("Starting background render...");
-      
-      // Start render without awaiting (fire and forget)
+    // Close modal before sharing (share sheet will appear)
+    closeShareLoadingModal();
+
+    // Share IMMEDIATELY - don't wait for anything
+    await shareBlob(blob);
+    
+    // If frame selected but not rendered, start render in background for NEXT share
+    if (state.selectedFrame !== "none" && !state.lastRenderedJobId && !state.isAutoRenderInProgress) {
+      console.log("Starting background render for next share...");
       renderVideoInBackground().then((renderedJobId) => {
         if (renderedJobId) {
-          console.log("Render completed in background, jobId:", renderedJobId);
+          console.log("Background render completed, ready for next share:", renderedJobId);
           state.lastRenderedJobId = renderedJobId;
           state.lastRenderedUrl = `${API_BASE}/video/download/${renderedJobId}`;
-          
-          // Fetch the rendered video and update the share modal
-          updateShareModalWithRenderedVideo();
+          showToast("Framed version ready for next share!", "success");
         }
       }).catch((err) => {
         console.error("Background render failed:", err);
-        // Close modal if render fails
-        closeShareLoadingModal();
-        showToast("Failed to render video. Sharing original instead...", "warning");
+        // Don't show error - user already shared successfully
       });
-    } else {
-      // No rendering needed, close modal immediately
-      closeShareLoadingModal();
     }
-
-    // Step 3: Share the blob immediately (within user gesture context)
-    // This preserves the gesture and opens the native share sheet
-    await shareBlob(blob);
 
   } catch (err) {
     console.error("Share error:", err);
@@ -1575,6 +1628,19 @@ elements.actionBtn.addEventListener("click", async (e) => {
 
 // URL input changes
 elements.videoUrl.addEventListener("input", updateActionButton);
+
+// Auto-fetch on paste - seamless UX
+elements.videoUrl.addEventListener("paste", (e) => {
+  // Wait for paste to complete
+  setTimeout(() => {
+    const url = elements.videoUrl.value.trim();
+    if (url && isValidSocialUrl(url) && !state.isProcessing) {
+      showToast("Valid URL detected, fetching...", "info");
+      updateActionButton();
+      fetchVideo();
+    }
+  }, 100);
+});
 
 // Enter key in URL input
 elements.videoUrl.addEventListener("keydown", (e) => {

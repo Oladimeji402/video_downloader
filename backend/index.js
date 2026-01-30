@@ -31,11 +31,12 @@ const rateLimiter = new RateLimiter({
   windowMs: 60 * 60 * 1000, // 1 hour
 });
 
-// Initialize file cleanup service (cleanup every 5 minutes, delete files older than 5 minutes)
+// Initialize file cleanup service (cleanup every 10 minutes, delete files older than 30 minutes)
+// Increased TTL to give users more time to select frames and share
 const fileCleanup = new FileCleanupService({
   dirs: [downloadsDir, renderedDir, uploadsDir],
-  maxAgeMs: 5 * 60 * 1000, // 5 minutes
-  intervalMs: 5 * 60 * 1000, // Check every 5 minutes
+  maxAgeMs: 30 * 60 * 1000, // 30 minutes (was 5 - too aggressive)
+  intervalMs: 10 * 60 * 1000, // Check every 10 minutes
 });
 
 // Start file cleanup service
@@ -57,16 +58,32 @@ app.use(express.urlencoded({ limit: '500mb', extended: true }));
 app.use(express.static(path.join(__dirname, "..", "frontend")));
 
 // Rate limiting middleware for video endpoints
+// ONLY rate limit expensive operations (downloads/renders), NOT status polling or streaming
 app.use("/api/video", (req, res, next) => {
   const ip = req.ip || req.connection.remoteAddress || "unknown";
   
-  if (!rateLimiter.isAllowed(ip)) {
+  // Only rate limit expensive operations that actually process videos
+  const expensiveOperations = [
+    { path: "/resolve", method: "POST" },
+    { path: "/upload", method: "POST" },
+    { path: "/render", method: "POST" },
+  ];
+  
+  const isExpensive = expensiveOperations.some(
+    op => req.path === op.path && req.method === op.method
+  );
+  
+  if (isExpensive && !rateLimiter.isAllowed(ip)) {
     const resetTime = rateLimiter.getResetTime(ip);
+    const remaining = rateLimiter.getRemaining(ip);
+    const minutesUntilReset = Math.ceil(resetTime / 60);
+    
     return res.status(429).json({
       success: false,
-      error: "Too many requests. Rate limit: 20 videos per hour.",
+      error: `Rate limit reached. You can process ${rateLimiter.maxRequests} videos per hour. Try again in ${minutesUntilReset} minute${minutesUntilReset === 1 ? '' : 's'}.`,
       retryAfter: resetTime,
       retryAfterSeconds: resetTime,
+      remaining: remaining,
     });
   }
   
