@@ -67,6 +67,7 @@ let state = {
   isProcessing: false,
   lastRenderedJobId: null,
   lastRenderedUrl: null,
+  isAutoRenderInProgress: false, // NEW: Prevent duplicate auto-renders
 };
 
 // ===========================================
@@ -324,11 +325,20 @@ async function autoStartRenderForFrame(frameId) {
     return;
   }
 
+  // If auto-render is already in progress, don't start another
+  if (state.isAutoRenderInProgress) {
+    console.log("Auto-render already in progress, skipping");
+    return;
+  }
+
   // Don't auto-render during downloads or other processing
   if (state.isProcessing) {
     console.log("Processing in progress, skipping auto-render");
     return;
   }
+
+  // Mark as in progress to prevent duplicates
+  state.isAutoRenderInProgress = true;
 
   try {
     console.log("Starting auto-render for frame:", frameId);
@@ -338,15 +348,47 @@ async function autoStartRenderForFrame(frameId) {
     const renderIndicator = document.getElementById("renderIndicator") || createRenderIndicator();
     renderIndicator.style.display = "flex";
     
-    // Start the render
-    const response = await fetch(`${API_BASE}/video/render`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        videoId: state.videoId,
-        frameId: frameId,
-      }),
-    });
+    // Start the render with retry logic for 429
+    let retryCount = 0;
+    const maxRetries = 3;
+    let response;
+
+    while (retryCount < maxRetries) {
+      try {
+        response = await fetch(`${API_BASE}/video/render`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            videoId: state.videoId,
+            frameId: frameId,
+          }),
+        });
+
+        // Handle rate limiting with exponential backoff
+        if (response.status === 429) {
+          retryCount++;
+          if (retryCount < maxRetries) {
+            const delayMs = Math.pow(2, retryCount) * 1000; // 2s, 4s, 8s
+            console.warn(`Rate limited (429). Retrying in ${delayMs}ms (attempt ${retryCount}/${maxRetries})`);
+            await new Promise(resolve => setTimeout(resolve, delayMs));
+            continue; // Retry
+          } else {
+            throw new Error("Too many requests. Server is busy. Please try again in a moment.");
+          }
+        }
+
+        // Success or other error - break retry loop
+        break;
+      } catch (fetchErr) {
+        if (retryCount < maxRetries - 1) {
+          console.warn(`Fetch error, retrying... ${fetchErr.message}`);
+          retryCount++;
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        } else {
+          throw fetchErr;
+        }
+      }
+    }
 
     if (!response.ok) {
       throw new Error(`Render request failed with status ${response.status}`);
@@ -365,6 +407,7 @@ async function autoStartRenderForFrame(frameId) {
         console.log("Auto-render completed, jobId:", jobId);
         state.lastRenderedJobId = jobId;
         state.lastRenderedUrl = `${API_BASE}/video/download/${jobId}`;
+        state.isAutoRenderInProgress = false;
         
         // Hide render indicator
         const indicator = document.getElementById("renderIndicator");
@@ -376,7 +419,8 @@ async function autoStartRenderForFrame(frameId) {
       })
       .catch((err) => {
         console.error("Auto-render failed:", err);
-        showToast("Frame preparation failed (original will be shared)", "warning");
+        state.isAutoRenderInProgress = false;
+        showToast(err.message || "Frame preparation failed (original will be shared)", "warning");
         
         // Hide render indicator
         const indicator = document.getElementById("renderIndicator");
@@ -387,7 +431,14 @@ async function autoStartRenderForFrame(frameId) {
 
   } catch (err) {
     console.error("Auto-render error:", err);
-    showToast("Frame preparation failed", "warning");
+    state.isAutoRenderInProgress = false;
+    showToast(err.message || "Frame preparation failed", "warning");
+    
+    // Hide render indicator
+    const indicator = document.getElementById("renderIndicator");
+    if (indicator) {
+      indicator.style.display = "none";
+    }
   }
 }
 
