@@ -607,7 +607,8 @@ function triggerDownload(url) {
 }
 
 /**
- * Share video using Web Share API (works on mobile for WhatsApp, etc.)
+ * Share video using Web Share API with in-memory Blob
+ * Preserves user gesture context for native sharing
  */
 async function shareVideo() {
   if (!state.videoId) {
@@ -618,226 +619,121 @@ async function shareVideo() {
   // Check if rendering is needed
   const needsRendering = state.selectedFrame !== "none" && !state.lastRenderedJobId;
 
-  // If a frame is selected and not yet rendered, render it first
-  if (needsRendering) {
-    showToast("Rendering video with frame...", "info");
-    const rendered = await renderVideoForSharing();
-    if (!rendered) {
-      showToast("Failed to render video", "error");
-      return;
-    }
-    // After async rendering, we've lost the user gesture context
-    // Fall back to download instead of navigator.share()
-    shareVideoAsDownload();
-    return;
+  // Determine which video URL to use
+  let videoUrl;
+  if (state.lastRenderedJobId && state.selectedFrame !== "none") {
+    videoUrl = state.lastRenderedUrl;
+  } else {
+    videoUrl = `${API_BASE}/video/preview/${state.videoId}`;
   }
 
-  // No rendering needed, can use navigator.share() with gesture context intact
-  shareVideoNative();
-}
+  // Show loading modal immediately (before fetching)
+  showShareLoadingModal(needsRendering);
 
-/**
- * Share video using native Web Share API (requires active user gesture)
- */
-function shareVideoNative() {
-  let videoUrl;
-  let videoBlob;
-  
   try {
-    // If a frame was rendered, use the rendered video URL
-    if (state.lastRenderedJobId && state.selectedFrame !== "none") {
-      videoUrl = state.lastRenderedUrl;
-      showToast("Preparing framed video for sharing...", "info");
-    } else {
-      // Otherwise, share the original video
-      videoUrl = `${API_BASE}/video/preview/${state.videoId}`;
-      showToast("Preparing video for sharing...", "info");
+    // Step 1: Fetch the video as a Blob
+    console.log("Fetching video for sharing:", videoUrl);
+    const response = await fetch(videoUrl);
+    
+    if (!response.ok) {
+      throw new Error(`Failed to fetch video: ${response.status}`);
     }
 
-    // Fetch the video as a blob
-    fetch(videoUrl)
-      .then((response) => {
-        if (!response.ok) {
-          console.error(`Failed to fetch video: ${response.status} ${response.statusText}`);
-          throw new Error(`Failed to fetch video: ${response.status}`);
-        }
-        return response.blob();
-      })
-      .then((blob) => {
-        videoBlob = blob;
-        console.log(`Video blob fetched: ${videoBlob.size} bytes`);
-        
-        if (videoBlob.size === 0) {
-          throw new Error("Video blob is empty");
-        }
-        
-        // Check if Web Share API is supported
-        if (navigator.share && navigator.canShare) {
-          const file = new File([videoBlob], `framed-video-${Date.now()}.mp4`, {
-            type: "video/mp4",
-          });
+    let blob = await response.blob();
+    console.log(`Video blob fetched: ${blob.size} bytes`);
 
-          const shareData = {
-            files: [file],
-            title: "My Framed Video",
-            text: "Check out my framed video!",
-          };
+    if (blob.size === 0) {
+      throw new Error("Video blob is empty");
+    }
 
-          if (navigator.canShare(shareData)) {
-            return navigator.share(shareData);
-          } else {
-            throw new Error("Cannot share video files on this device");
-          }
-        } else {
-          throw new Error("Share API not supported on this device");
+    // Step 2: If rendering is needed, start the render in background and show modal
+    if (needsRendering) {
+      console.log("Starting background render...");
+      
+      // Start render without awaiting (fire and forget)
+      renderVideoInBackground().then((renderedJobId) => {
+        if (renderedJobId) {
+          console.log("Render completed in background, jobId:", renderedJobId);
+          state.lastRenderedJobId = renderedJobId;
+          state.lastRenderedUrl = `${API_BASE}/video/download/${renderedJobId}`;
+          
+          // Fetch the rendered video and update the share modal
+          updateShareModalWithRenderedVideo();
         }
-      })
-      .then(() => {
-        showToast("Video shared successfully!", "success");
-        console.log("Video shared via Web Share API");
-      })
-      .catch((err) => {
-        console.error("Share error:", err);
-        if (err.name === "AbortError") {
-          showToast("Share cancelled", "info");
-        } else {
-          showToast("Share not available. Using download instead...", "info");
-          shareVideoAsDownload();
-        }
+      }).catch((err) => {
+        console.error("Background render failed:", err);
+        // Close modal if render fails
+        closeShareLoadingModal();
+        showToast("Failed to render video. Sharing original instead...", "warning");
       });
+    } else {
+      // No rendering needed, close modal immediately
+      closeShareLoadingModal();
+    }
+
+    // Step 3: Share the blob immediately (within user gesture context)
+    // This preserves the gesture and opens the native share sheet
+    await shareBlob(blob);
+
   } catch (err) {
     console.error("Share error:", err);
-    showToast("Unable to share. Downloading instead...", "warning");
-    shareVideoAsDownload();
+    closeShareLoadingModal();
+    showToast(err.message || "Unable to share video", "error");
   }
 }
 
 /**
- * Share video by triggering download (fallback when gesture context is lost)
+ * Share a Blob using native Web Share API
+ * Must be called within a user gesture context
  */
-function shareVideoAsDownload() {
-  let videoUrl;
-  
+async function shareBlob(blob) {
+  // Check if Web Share API is supported
+  if (!navigator.share || !navigator.canShare) {
+    throw new Error("Share API not supported on this device");
+  }
+
   try {
-    // If a frame was rendered, use the rendered video URL
-    if (state.lastRenderedJobId && state.selectedFrame !== "none") {
-      videoUrl = state.lastRenderedUrl;
-      showToast("Downloading framed video...", "info");
-    } else {
-      // Otherwise, download the original video
-      videoUrl = `${API_BASE}/video/preview/${state.videoId}`;
-      showToast("Downloading video...", "info");
+    const file = new File([blob], `framed-video-${Date.now()}.mp4`, {
+      type: "video/mp4",
+    });
+
+    const shareData = {
+      files: [file],
+      title: "My Framed Video",
+      text: "Check out my framed video!",
+    };
+
+    // Validate that we can share this data
+    if (!navigator.canShare(shareData)) {
+      throw new Error("Cannot share video files on this device");
     }
 
-    // Fetch the video as a blob and trigger download
-    fetch(videoUrl)
-      .then((response) => {
-        if (!response.ok) {
-          throw new Error(`Failed to fetch video: ${response.status}`);
-        }
-        return response.blob();
-      })
-      .then((blob) => {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `framed-video-${Date.now()}.mp4`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
-        showToast("Download started!", "success");
-      })
-      .catch((err) => {
-        console.error("Download error:", err);
-        showToast("Failed to download video", "error");
-      });
+    // Share immediately - this opens the native share sheet
+    await navigator.share(shareData);
+    showToast("Video shared successfully!", "success");
+    console.log("Video shared via Web Share API");
+
   } catch (err) {
-    console.error("Share error:", err);
-    showToast("Unable to share or download", "error");
-  }
-}
-
-/**
- * Share video to WhatsApp using WhatsApp Web URL
- */
-async function shareToWhatsApp() {
-  if (!state.videoId) {
-    showToast("Please fetch a video first", "warning");
-    return;
-  }
-
-  // If a frame is selected and not yet rendered, render it first
-  if (state.selectedFrame !== "none" && !state.lastRenderedJobId) {
-    showToast("Rendering video with frame... Please wait", "info");
-    const rendered = await renderVideoForSharing();
-    if (!rendered) {
-      showToast("Failed to render video. Check console for details", "error");
+    if (err.name === "AbortError") {
+      console.log("Share cancelled by user");
+      // Don't show error toast for user cancellation
       return;
     }
-  }
-
-  try {
-    // Get the shareable URL
-    const shareableUrl = getShareableVideoUrl();
-    
-    // Create WhatsApp share message
-    const message = encodeURIComponent(
-      `Check out my framed video! ${shareableUrl}`
-    );
-    
-    // Open WhatsApp Web/App with the message
-    // On mobile, this opens the WhatsApp app
-    // On desktop, this opens WhatsApp Web
-    const whatsappUrl = `https://wa.me/?text=${message}`;
-    
-    window.open(whatsappUrl, "_blank");
-    showToast("Opening WhatsApp...", "success");
-  } catch (err) {
-    console.error("WhatsApp share error:", err);
-    showToast("Failed to open WhatsApp", "error");
+    throw err;
   }
 }
 
 /**
- * Copy shareable video link to clipboard
+ * Render video in background without blocking user gesture
+ * Returns the jobId when complete
  */
-async function copyVideoLink() {
-  if (!state.videoId) {
-    showToast("Please fetch a video first", "warning");
-    return;
-  }
-
-  // If a frame is selected and not yet rendered, render it first
-  if (state.selectedFrame !== "none" && !state.lastRenderedJobId) {
-    showToast("Rendering video with frame... Please wait", "info");
-    const rendered = await renderVideoForSharing();
-    if (!rendered) {
-      showToast("Failed to render video. Check console for details", "error");
-      return;
-    }
-  }
-
-  try {
-    const shareableUrl = getShareableVideoUrl();
-    await navigator.clipboard.writeText(shareableUrl);
-    showToast("Link copied to clipboard!", "success");
-  } catch (err) {
-    console.error("Copy error:", err);
-    showToast("Failed to copy link", "error");
-  }
-}
-
-/**
- * Render video for sharing (without downloading)
- */
-async function renderVideoForSharing() {
+async function renderVideoInBackground() {
   if (!state.videoId || state.selectedFrame === "none") {
-    return true; // No rendering needed
+    return null;
   }
 
   try {
-    console.log("Starting render for sharing...");
+    console.log("Starting background render...");
     // Start the render
     const response = await fetch(`${API_BASE}/video/render`, {
       method: "POST",
@@ -862,73 +758,258 @@ async function renderVideoForSharing() {
     const jobId = data.jobId;
     console.log("Polling for job:", jobId);
 
-    // Poll for render completion with exponential backoff
-    let pollCount = 0;
-    const maxPolls = 300; // 5 minutes max
-    let pollDelay = 2000; // Start with 2 seconds to avoid rate limit
-    let rateLimited = false;
+    // Poll for render completion
+    return pollRenderJob(jobId);
 
-    while (pollCount < maxPolls) {
-      await new Promise(resolve => setTimeout(resolve, pollDelay));
+  } catch (err) {
+    console.error("Background render error:", err);
+    throw err;
+  }
+}
+
+/**
+ * Poll for render job completion
+ */
+async function pollRenderJob(jobId) {
+  let pollCount = 0;
+  const maxPolls = 300; // 5 minutes max
+  let pollDelay = 2000; // Start with 2 seconds
+
+  while (pollCount < maxPolls) {
+    await new Promise(resolve => setTimeout(resolve, pollDelay));
+    
+    try {
+      const statusResponse = await fetch(`${API_BASE}/video/render/${jobId}`);
       
-      try {
-        const statusResponse = await fetch(`${API_BASE}/video/render/${jobId}`);
-        
-        // Handle rate limiting with exponential backoff
-        if (statusResponse.status === 429) {
-          rateLimited = true;
-          pollDelay = Math.min(pollDelay * 2, 30000); // Cap at 30 seconds
-          console.warn(`Rate limited. Next poll in ${pollDelay}ms`);
-          pollCount++;
-          continue;
+      // Handle rate limiting
+      if (statusResponse.status === 429) {
+        pollDelay = Math.min(pollDelay * 2, 30000);
+        console.warn(`Rate limited. Next poll in ${pollDelay}ms`);
+        pollCount++;
+        continue;
+      }
+
+      if (!statusResponse.ok) {
+        throw new Error(`Status check failed with status ${statusResponse.status}`);
+      }
+
+      const statusData = await statusResponse.json();
+      
+      if (!statusData.success) {
+        throw new Error(statusData.error || "Render failed");
+      }
+
+      // Reset poll delay on successful response
+      if (pollDelay > 2000) {
+        pollDelay = 2000;
+      }
+
+      if (statusData.status === "completed") {
+        console.log("Render completed successfully!");
+        return jobId;
+      }
+
+      if (statusData.status === "failed") {
+        throw new Error(statusData.error || "Render job failed");
+      }
+
+      // Still processing - continue polling
+      pollCount++;
+
+    } catch (pollErr) {
+      console.error(`Poll error: ${pollErr.message}`);
+      pollCount++;
+      if (pollCount >= maxPolls) {
+        throw new Error("Render timeout after 5 minutes");
+      }
+    }
+  }
+
+  throw new Error("Render timeout after 5 minutes");
+}
+
+/**
+ * Show loading modal for share operation
+ */
+function showShareLoadingModal(showRenderProgress = false) {
+  // Create modal HTML
+  const modalHtml = `
+    <div class="share-modal-overlay" id="shareModalOverlay">
+      <div class="share-modal">
+        <div class="share-modal-content">
+          <div class="share-spinner-large"></div>
+          <h3 class="share-modal-title">Preparing Video</h3>
+          <p class="share-modal-text" id="shareModalText">
+            ${showRenderProgress 
+              ? "Rendering with frame..." 
+              : "Opening share options..."
+            }
+          </p>
+          ${showRenderProgress 
+            ? '<div class="share-modal-progress"><div class="share-modal-progress-bar" id="shareModalProgressBar"></div></div>'
+            : ''
+          }
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Remove existing modal if present
+  const existingModal = document.getElementById("shareModalOverlay");
+  if (existingModal) {
+    existingModal.remove();
+  }
+
+  // Insert modal into DOM
+  document.body.insertAdjacentHTML("beforeend", modalHtml);
+
+  // Add styles if not already present
+  if (!document.getElementById("shareModalStyles")) {
+    const style = document.createElement("style");
+    style.id = "shareModalStyles";
+    style.textContent = `
+      .share-modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.5);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10000;
+        backdrop-filter: blur(4px);
+      }
+
+      .share-modal {
+        background: white;
+        border-radius: 16px;
+        padding: 32px;
+        max-width: 320px;
+        width: 90%;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        text-align: center;
+        animation: slideUp 0.3s ease-out;
+      }
+
+      @keyframes slideUp {
+        from {
+          opacity: 0;
+          transform: translateY(20px);
         }
-
-        if (!statusResponse.ok) {
-          console.error(`Status check failed: ${statusResponse.status}`);
-          throw new Error(`Status check failed with status ${statusResponse.status}`);
-        }
-
-        const statusData = await statusResponse.json();
-        console.log(`Poll ${pollCount + 1}: status = ${statusData.status}, progress = ${statusData.progress}%`);
-
-        if (!statusData.success) {
-          throw new Error(statusData.error || "Render failed");
-        }
-
-        // Reset poll delay on successful response
-        if (rateLimited) {
-          pollDelay = 2000;
-          rateLimited = false;
-        }
-
-        if (statusData.status === "completed") {
-          // Store the rendered video info
-          state.lastRenderedJobId = jobId;
-          state.lastRenderedUrl = `${API_BASE}/video/download/${jobId}`;
-          console.log("Render completed successfully!");
-          return true;
-        }
-
-        if (statusData.status === "failed") {
-          throw new Error(statusData.error || "Render job failed");
-        }
-
-        // Success but still processing - continue polling
-      } catch (pollErr) {
-        console.error(`Poll error: ${pollErr.message}`);
-        // For other errors, increase delay slightly but continue
-        if (!rateLimited) {
-          pollDelay = Math.min(pollDelay * 1.5, 10000);
+        to {
+          opacity: 1;
+          transform: translateY(0);
         }
       }
 
-      pollCount++;
+      .share-modal-content {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 16px;
+      }
+
+      .share-spinner-large {
+        width: 48px;
+        height: 48px;
+        border: 4px solid #f0f0f0;
+        border-top-color: #007AFF;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+      }
+
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
+
+      .share-modal-title {
+        font-size: 18px;
+        font-weight: 600;
+        color: #000;
+        margin: 0;
+      }
+
+      .share-modal-text {
+        font-size: 14px;
+        color: #666;
+        margin: 0;
+      }
+
+      .share-modal-progress {
+        width: 100%;
+        height: 4px;
+        background: #f0f0f0;
+        border-radius: 2px;
+        overflow: hidden;
+        margin-top: 8px;
+      }
+
+      .share-modal-progress-bar {
+        height: 100%;
+        background: linear-gradient(90deg, #007AFF, #34C759);
+        width: 0%;
+        transition: width 0.3s ease;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+}
+
+/**
+ * Close share loading modal
+ */
+function closeShareLoadingModal() {
+  const modal = document.getElementById("shareModalOverlay");
+  if (modal) {
+    modal.style.animation = "slideUp 0.3s ease-out reverse";
+    setTimeout(() => modal.remove(), 300);
+  }
+}
+
+/**
+ * Update share modal with rendered video once ready
+ */
+async function updateShareModalWithRenderedVideo() {
+  const modal = document.getElementById("shareModalOverlay");
+  if (!modal) return;
+
+  const textEl = document.getElementById("shareModalText");
+  const progressBar = document.getElementById("shareModalProgressBar");
+
+  try {
+    if (textEl) {
+      textEl.textContent = "Render complete! Fetching optimized version...";
     }
 
-    throw new Error("Render timeout after 5 minutes");
+    // Fetch the rendered video
+    const renderedUrl = state.lastRenderedUrl;
+    const response = await fetch(renderedUrl);
+    
+    if (!response.ok) {
+      throw new Error("Failed to fetch rendered video");
+    }
+
+    const blob = await response.blob();
+    
+    if (textEl) {
+      textEl.textContent = "Ready to share!";
+    }
+
+    if (progressBar) {
+      progressBar.style.width = "100%";
+    }
+
+    // Close modal after a brief delay
+    setTimeout(() => closeShareLoadingModal(), 1000);
+
   } catch (err) {
-    console.error("Render error:", err);
-    return false;
+    console.error("Failed to update with rendered video:", err);
+    if (textEl) {
+      textEl.textContent = "Ready to share!";
+    }
+    setTimeout(() => closeShareLoadingModal(), 1500);
   }
 }
 
@@ -942,6 +1023,141 @@ function getShareableVideoUrl() {
   }
   // Otherwise, return the original video URL
   return `${window.location.origin}/api/video/preview/${state.videoId}`;
+}
+
+/**
+ * Share video to WhatsApp using native share or WhatsApp Web
+ */
+async function shareToWhatsApp() {
+  if (!state.videoId) {
+    showToast("Please fetch a video first", "warning");
+    return;
+  }
+
+  // Check if rendering is needed
+  const needsRendering = state.selectedFrame !== "none" && !state.lastRenderedJobId;
+
+  // Determine which video URL to use
+  let videoUrl;
+  if (state.lastRenderedJobId && state.selectedFrame !== "none") {
+    videoUrl = state.lastRenderedUrl;
+  } else {
+    videoUrl = `${API_BASE}/video/preview/${state.videoId}`;
+  }
+
+  // Show loading modal
+  showShareLoadingModal(needsRendering);
+
+  try {
+    // Fetch the video as a blob
+    const response = await fetch(videoUrl);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch video: ${response.status}`);
+    }
+
+    const blob = await response.blob();
+    console.log(`Video blob fetched: ${blob.size} bytes`);
+
+    if (blob.size === 0) {
+      throw new Error("Video blob is empty");
+    }
+
+    // Start background render if needed
+    if (needsRendering) {
+      renderVideoInBackground().then((renderedJobId) => {
+        if (renderedJobId) {
+          state.lastRenderedJobId = renderedJobId;
+          state.lastRenderedUrl = `${API_BASE}/video/download/${renderedJobId}`;
+        }
+      }).catch((err) => {
+        console.error("Background render failed:", err);
+      });
+    }
+
+    closeShareLoadingModal();
+
+    // Try to use native share first (on mobile)
+    if (navigator.share && navigator.canShare) {
+      try {
+        const file = new File([blob], `framed-video-${Date.now()}.mp4`, {
+          type: "video/mp4",
+        });
+
+        const shareData = {
+          files: [file],
+          title: "My Framed Video",
+          text: "Check out my framed video!",
+        };
+
+        if (navigator.canShare(shareData)) {
+          await navigator.share(shareData);
+          showToast("Video shared via WhatsApp!", "success");
+          return;
+        }
+      } catch (err) {
+        console.log("Native share not available, falling back to WhatsApp Web");
+      }
+    }
+
+    // Fallback: Open WhatsApp Web with shareable link
+    try {
+      const shareableUrl = getShareableVideoUrl();
+      const message = encodeURIComponent(
+        `Check out my framed video! ${shareableUrl}`
+      );
+      window.open(`https://wa.me/?text=${message}`, "_blank");
+      showToast("Opening WhatsApp...", "success");
+    } catch (err) {
+      throw new Error("Failed to open WhatsApp");
+    }
+
+  } catch (err) {
+    console.error("WhatsApp share error:", err);
+    closeShareLoadingModal();
+    showToast(err.message || "Failed to share to WhatsApp", "error");
+  }
+}
+
+/**
+ * Copy shareable video link to clipboard
+ */
+async function copyVideoLink() {
+  if (!state.videoId) {
+    showToast("Please fetch a video first", "warning");
+    return;
+  }
+
+  // Check if rendering is needed
+  const needsRendering = state.selectedFrame !== "none" && !state.lastRenderedJobId;
+
+  // Show loading modal if rendering is needed
+  if (needsRendering) {
+    showShareLoadingModal(true);
+
+    try {
+      // Render the video in background
+      const jobId = await renderVideoInBackground();
+      if (jobId) {
+        state.lastRenderedJobId = jobId;
+        state.lastRenderedUrl = `${API_BASE}/video/download/${jobId}`;
+      }
+      closeShareLoadingModal();
+    } catch (err) {
+      console.error("Render error:", err);
+      closeShareLoadingModal();
+      showToast("Failed to render video for copying", "error");
+      return;
+    }
+  }
+
+  try {
+    const shareableUrl = getShareableVideoUrl();
+    await navigator.clipboard.writeText(shareableUrl);
+    showToast("Link copied to clipboard!", "success");
+  } catch (err) {
+    console.error("Copy error:", err);
+    showToast("Failed to copy link", "error");
+  }
 }
 
 /**
