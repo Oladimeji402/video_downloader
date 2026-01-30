@@ -48,6 +48,11 @@ const elements = {
   renderStatusText: document.getElementById("renderStatusText"),
   renderProgress: document.getElementById("renderProgress"),
 
+  // Share buttons
+  shareBtn: document.getElementById("shareBtn"),
+  whatsappBtn: document.getElementById("whatsappBtn"),
+  copyLinkBtn: document.getElementById("copyLinkBtn"),
+
   // Toast container
   toastContainer: document.getElementById("toastContainer"),
 };
@@ -60,6 +65,8 @@ let state = {
   selectedFrame: "none",
   frames: [],
   isProcessing: false,
+  lastRenderedJobId: null,
+  lastRenderedUrl: null,
 };
 
 // ===========================================
@@ -484,8 +491,12 @@ async function downloadVideo() {
       elements.renderProgress,
       // On complete
       () => {
+        // Store the rendered video info for sharing
+        state.lastRenderedJobId = data.jobId;
+        state.lastRenderedUrl = `${API_BASE}/video/download/${data.jobId}`;
+        
         // Trigger download
-        triggerDownload(`${API_BASE}/video/download/${data.jobId}`);
+        triggerDownload(state.lastRenderedUrl);
         showToast("Video rendered! Download starting...", "success");
         state.isProcessing = false;
         setButtonLoading(elements.downloadBtn, false, `
@@ -570,6 +581,136 @@ function triggerDownload(url) {
   document.body.appendChild(a);
   a.click();
   a.remove();
+}
+
+/**
+ * Share video using Web Share API (works on mobile for WhatsApp, etc.)
+ */
+async function shareVideo() {
+  if (!state.videoId) {
+    showToast("Please fetch a video first", "warning");
+    return;
+  }
+
+  // Get the appropriate video URL
+  let videoUrl;
+  let videoBlob;
+  
+  try {
+    // If a frame was rendered, use the rendered video
+    if (state.lastRenderedJobId && state.selectedFrame !== "none") {
+      videoUrl = state.lastRenderedUrl;
+      showToast("Preparing framed video for sharing...", "info");
+    } else {
+      // Otherwise, share the original video
+      videoUrl = `${API_BASE}/video/preview/${state.videoId}`;
+      showToast("Preparing video for sharing...", "info");
+    }
+
+    // Fetch the video as a blob
+    const response = await fetch(videoUrl);
+    if (!response.ok) throw new Error("Failed to fetch video");
+    
+    videoBlob = await response.blob();
+    
+    // Check if Web Share API is supported
+    if (navigator.share && navigator.canShare) {
+      const file = new File([videoBlob], `framed-video-${Date.now()}.mp4`, {
+        type: "video/mp4",
+      });
+
+      const shareData = {
+        files: [file],
+        title: "My Framed Video",
+        text: "Check out my framed video!",
+      };
+
+      if (navigator.canShare(shareData)) {
+        await navigator.share(shareData);
+        showToast("Video shared successfully!", "success");
+      } else {
+        throw new Error("Cannot share video files on this device");
+      }
+    } else {
+      // Fallback: download the video instead
+      showToast("Share API not supported. Downloading video instead...", "info");
+      const url = URL.createObjectURL(videoBlob);
+      triggerDownload(url);
+      URL.revokeObjectURL(url);
+    }
+  } catch (err) {
+    console.error("Share error:", err);
+    if (err.name === "AbortError") {
+      showToast("Share cancelled", "info");
+    } else {
+      showToast(
+        "Unable to share. Try the Download button instead.",
+        "warning"
+      );
+    }
+  }
+}
+
+/**
+ * Share video to WhatsApp using WhatsApp Web URL
+ */
+async function shareToWhatsApp() {
+  if (!state.videoId) {
+    showToast("Please fetch a video first", "warning");
+    return;
+  }
+
+  try {
+    // Get the shareable URL
+    const shareableUrl = getShareableVideoUrl();
+    
+    // Create WhatsApp share message
+    const message = encodeURIComponent(
+      `Check out my framed video! ${shareableUrl}`
+    );
+    
+    // Open WhatsApp Web/App with the message
+    // On mobile, this opens the WhatsApp app
+    // On desktop, this opens WhatsApp Web
+    const whatsappUrl = `https://wa.me/?text=${message}`;
+    
+    window.open(whatsappUrl, "_blank");
+    showToast("Opening WhatsApp...", "success");
+  } catch (err) {
+    console.error("WhatsApp share error:", err);
+    showToast("Failed to open WhatsApp", "error");
+  }
+}
+
+/**
+ * Copy shareable video link to clipboard
+ */
+async function copyVideoLink() {
+  if (!state.videoId) {
+    showToast("Please fetch a video first", "warning");
+    return;
+  }
+
+  try {
+    const shareableUrl = getShareableVideoUrl();
+    await navigator.clipboard.writeText(shareableUrl);
+    showToast("Link copied to clipboard!", "success");
+  } catch (err) {
+    console.error("Copy error:", err);
+    showToast("Failed to copy link", "error");
+  }
+}
+
+/**
+ * Get shareable video URL
+ */
+function getShareableVideoUrl() {
+  // If a frame was rendered, use the rendered video URL
+  if (state.lastRenderedJobId && state.selectedFrame !== "none") {
+    return `${window.location.origin}/api/video/download/${state.lastRenderedJobId}`;
+  }
+  // Otherwise, return the original video URL
+  return `${window.location.origin}/api/video/preview/${state.videoId}`;
 }
 
 /**
@@ -825,6 +966,24 @@ elements.frameOptions.addEventListener("click", (e) => {
   if (option && option.dataset.frame) {
     selectFrame(option.dataset.frame);
   }
+});
+
+// Share button
+elements.shareBtn.addEventListener("click", (e) => {
+  e.preventDefault();
+  shareVideo();
+});
+
+// WhatsApp button
+elements.whatsappBtn.addEventListener("click", (e) => {
+  e.preventDefault();
+  shareToWhatsApp();
+});
+
+// Copy link button
+elements.copyLinkBtn.addEventListener("click", (e) => {
+  e.preventDefault();
+  copyVideoLink();
 });
 
 // ===========================================

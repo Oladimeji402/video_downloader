@@ -577,6 +577,60 @@ input[type="text"]:focus {
   margin-top: var(--space-md);
 }
 
+/* Share Section */
+.share-section {
+  margin-top: var(--space-lg);
+  padding-top: var(--space-lg);
+  border-top: 1px solid var(--border-color);
+}
+
+.share-label {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  text-align: center;
+  margin-bottom: var(--space-md);
+  font-weight: 500;
+}
+
+.share-buttons {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-sm);
+}
+
+.share-buttons .btn {
+  font-size: 0.85rem;
+  padding: var(--space-sm) var(--space-md);
+}
+
+.share-buttons .btn .icon {
+  width: 18px;
+  height: 18px;
+}
+
+/* WhatsApp button custom styling */
+#whatsappBtn {
+  color: #25d366;
+  border-color: #25d366;
+}
+
+#whatsappBtn:hover {
+  background: #25d366;
+  color: white;
+  border-color: #25d366;
+}
+
+/* Responsive share buttons for mobile */
+@media (max-width: 480px) {
+  .share-buttons {
+    grid-template-columns: 1fr;
+  }
+  
+  .share-buttons .btn {
+    width: 100%;
+  }
+}
+
 /* Footer */
 .footer {
   margin-top: auto;
