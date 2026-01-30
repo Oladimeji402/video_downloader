@@ -258,6 +258,12 @@ function selectFrame(frameId) {
 
   // Update preview overlay
   updateFramePreview(frameId);
+
+  // Auto-start rendering in background if frame is selected and video is loaded
+  if (frameId !== "none" && state.videoId) {
+    console.log("Auto-starting render for selected frame:", frameId);
+    autoStartRenderForFrame(frameId);
+  }
 }
 
 /**
@@ -306,6 +312,144 @@ function updateFramePreview(frameId) {
     }
   }
 }
+
+/**
+ * Auto-start rendering when a frame is selected
+ * This ensures the framed video is ready when user clicks Share
+ */
+async function autoStartRenderForFrame(frameId) {
+  // If already rendering this frame, don't start again
+  if (state.lastRenderedJobId && state.selectedFrame === frameId) {
+    console.log("Frame already rendered, skipping auto-render");
+    return;
+  }
+
+  // Don't auto-render during downloads or other processing
+  if (state.isProcessing) {
+    console.log("Processing in progress, skipping auto-render");
+    return;
+  }
+
+  try {
+    console.log("Starting auto-render for frame:", frameId);
+    showToast("Preparing framed video...", "info");
+    
+    // Show a subtle render indicator (top of download section)
+    const renderIndicator = document.getElementById("renderIndicator") || createRenderIndicator();
+    renderIndicator.style.display = "flex";
+    
+    // Start the render
+    const response = await fetch(`${API_BASE}/video/render`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        videoId: state.videoId,
+        frameId: frameId,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Render request failed with status ${response.status}`);
+    }
+
+    const data = await response.json();
+    console.log("Auto-render started:", data);
+
+    if (!data.success) {
+      throw new Error(data.error || "Failed to start render");
+    }
+
+    // Poll for completion
+    pollRenderJob(data.jobId)
+      .then((jobId) => {
+        console.log("Auto-render completed, jobId:", jobId);
+        state.lastRenderedJobId = jobId;
+        state.lastRenderedUrl = `${API_BASE}/video/download/${jobId}`;
+        
+        // Hide render indicator
+        const indicator = document.getElementById("renderIndicator");
+        if (indicator) {
+          indicator.style.display = "none";
+        }
+        
+        showToast("Framed video ready!", "success");
+      })
+      .catch((err) => {
+        console.error("Auto-render failed:", err);
+        showToast("Frame preparation failed (original will be shared)", "warning");
+        
+        // Hide render indicator
+        const indicator = document.getElementById("renderIndicator");
+        if (indicator) {
+          indicator.style.display = "none";
+        }
+      });
+
+  } catch (err) {
+    console.error("Auto-render error:", err);
+    showToast("Frame preparation failed", "warning");
+  }
+}
+
+/**
+ * Create a subtle render progress indicator
+ */
+function createRenderIndicator() {
+  const indicator = document.createElement("div");
+  indicator.id = "renderIndicator";
+  indicator.style.cssText = `
+    display: none;
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: linear-gradient(135deg, #007AFF, #34C759);
+    color: white;
+    padding: 12px 16px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 500;
+    align-items: center;
+    gap: 8px;
+    box-shadow: 0 4px 12px rgba(0, 122, 255, 0.3);
+    z-index: 9999;
+    animation: slideInUp 0.3s ease-out;
+  `;
+  
+  indicator.innerHTML = `
+    <div style="width: 12px; height: 12px; border: 2px solid white; border-top: 2px solid transparent; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+    <span>Preparing frame...</span>
+  `;
+  
+  document.body.appendChild(indicator);
+  
+  // Inject animation if not already present
+  if (!document.getElementById("renderIndicatorStyles")) {
+    const style = document.createElement("style");
+    style.id = "renderIndicatorStyles";
+    style.textContent = `
+      @keyframes slideInUp {
+        from {
+          opacity: 0;
+          transform: translateY(20px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
+    `;
+    document.head.appendChild(style);
+  }
+  
+  return indicator;
+}
+
+/**
+ * Update frame preview overlay
+ */
 
 // ===========================================
 // Video Operations
