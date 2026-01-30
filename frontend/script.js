@@ -805,7 +805,7 @@ async function renderVideoForSharing() {
     const jobId = data.jobId;
     console.log("Polling for job:", jobId);
 
-    // Poll for render completion with exponential backoff
+    // Poll for render completion
     let pollCount = 0;
     const maxPolls = 300; // 5 minutes max
     let pollDelay = POLL_INTERVAL;
@@ -840,11 +840,8 @@ async function renderVideoForSharing() {
           throw new Error(statusData.error || "Render job failed");
         }
 
-        // Success but still processing
-        if (statusData.status === "processing") {
-          // Keep polling
-          pollDelay = POLL_INTERVAL; // Reset to normal interval
-        }
+        // Success but still processing - continue polling
+        pollDelay = POLL_INTERVAL;
       } catch (pollErr) {
         console.error(`Poll error: ${pollErr.message}`);
         // Continue polling on errors
@@ -856,7 +853,6 @@ async function renderVideoForSharing() {
     throw new Error("Render timeout after 5 minutes");
   } catch (err) {
     console.error("Render error:", err);
-    showToast(`Render error: ${err.message}`, "error");
     return false;
   }
 }
