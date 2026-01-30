@@ -805,10 +805,11 @@ async function renderVideoForSharing() {
     const jobId = data.jobId;
     console.log("Polling for job:", jobId);
 
-    // Poll for render completion
+    // Poll for render completion with exponential backoff
     let pollCount = 0;
     const maxPolls = 300; // 5 minutes max
-    let pollDelay = POLL_INTERVAL;
+    let pollDelay = 2000; // Start with 2 seconds to avoid rate limit
+    let rateLimited = false;
 
     while (pollCount < maxPolls) {
       await new Promise(resolve => setTimeout(resolve, pollDelay));
@@ -816,6 +817,15 @@ async function renderVideoForSharing() {
       try {
         const statusResponse = await fetch(`${API_BASE}/video/render/${jobId}`);
         
+        // Handle rate limiting with exponential backoff
+        if (statusResponse.status === 429) {
+          rateLimited = true;
+          pollDelay = Math.min(pollDelay * 2, 30000); // Cap at 30 seconds
+          console.warn(`Rate limited. Next poll in ${pollDelay}ms`);
+          pollCount++;
+          continue;
+        }
+
         if (!statusResponse.ok) {
           console.error(`Status check failed: ${statusResponse.status}`);
           throw new Error(`Status check failed with status ${statusResponse.status}`);
@@ -826,6 +836,12 @@ async function renderVideoForSharing() {
 
         if (!statusData.success) {
           throw new Error(statusData.error || "Render failed");
+        }
+
+        // Reset poll delay on successful response
+        if (rateLimited) {
+          pollDelay = 2000;
+          rateLimited = false;
         }
 
         if (statusData.status === "completed") {
@@ -841,10 +857,12 @@ async function renderVideoForSharing() {
         }
 
         // Success but still processing - continue polling
-        pollDelay = POLL_INTERVAL;
       } catch (pollErr) {
         console.error(`Poll error: ${pollErr.message}`);
-        // Continue polling on errors
+        // For other errors, increase delay slightly but continue
+        if (!rateLimited) {
+          pollDelay = Math.min(pollDelay * 1.5, 10000);
+        }
       }
 
       pollCount++;
