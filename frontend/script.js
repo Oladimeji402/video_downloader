@@ -244,7 +244,12 @@ function renderFrameOptions() {
  * Select a frame
  */
 function selectFrame(frameId) {
+  console.log("Selecting frame:", frameId);
   state.selectedFrame = frameId;
+  
+  // Reset rendered state when changing frames
+  state.lastRenderedJobId = null;
+  state.lastRenderedUrl = null;
 
   // Update UI
   document.querySelectorAll(".frame-option").forEach((opt) => {
@@ -259,14 +264,18 @@ function selectFrame(frameId) {
  * Update frame preview overlay
  */
 function updateFramePreview(frameId) {
+  console.log("Updating preview for frame:", frameId);
   const overlay = elements.frameOverlay;
   const preview = elements.framePreview;
 
-  // Reset
+  // Reset completely
   overlay.style.backgroundImage = "";
+  overlay.style.opacity = "0";
+  overlay.style.display = "block";
   preview.removeAttribute("data-frame");
 
   if (frameId === "none") {
+    console.log("No frame selected");
     return;
   }
 
@@ -274,12 +283,24 @@ function updateFramePreview(frameId) {
   const cssFrames = ["blue", "gold", "neon", "gradient"];
   
   if (cssFrames.includes(frameId)) {
+    console.log("CSS frame:", frameId);
     preview.setAttribute("data-frame", frameId);
+    overlay.style.opacity = "1";
   } else {
-    // Image frame
+    // Image frame - show it over the video
     const frame = state.frames.find((f) => f.id === frameId);
     if (frame) {
-      overlay.style.backgroundImage = `url(${window.location.origin}${frame.path})`;
+      console.log("Image frame found:", frame);
+      const imageUrl = `${window.location.origin}${frame.path}`;
+      console.log("Loading frame image from:", imageUrl);
+      overlay.style.backgroundImage = `url(${imageUrl})`;
+      overlay.style.backgroundSize = "100% 100%";
+      overlay.style.backgroundPosition = "center";
+      overlay.style.backgroundRepeat = "no-repeat";
+      overlay.style.opacity = "1";
+      console.log("Frame overlay opacity set to 1");
+    } else {
+      console.log("Frame not found in state.frames:", frameId);
     }
   }
 }
@@ -592,6 +613,16 @@ async function shareVideo() {
     return;
   }
 
+  // If a frame is selected and not yet rendered, render it first
+  if (state.selectedFrame !== "none" && !state.lastRenderedJobId) {
+    showToast("Rendering video with frame...", "info");
+    const rendered = await renderVideoForSharing();
+    if (!rendered) {
+      showToast("Failed to render video", "error");
+      return;
+    }
+  }
+
   // Get the appropriate video URL
   let videoUrl;
   let videoBlob;
@@ -660,6 +691,16 @@ async function shareToWhatsApp() {
     return;
   }
 
+  // If a frame is selected and not yet rendered, render it first
+  if (state.selectedFrame !== "none" && !state.lastRenderedJobId) {
+    showToast("Rendering video with frame...", "info");
+    const rendered = await renderVideoForSharing();
+    if (!rendered) {
+      showToast("Failed to render video", "error");
+      return;
+    }
+  }
+
   try {
     // Get the shareable URL
     const shareableUrl = getShareableVideoUrl();
@@ -691,6 +732,16 @@ async function copyVideoLink() {
     return;
   }
 
+  // If a frame is selected and not yet rendered, render it first
+  if (state.selectedFrame !== "none" && !state.lastRenderedJobId) {
+    showToast("Rendering video with frame...", "info");
+    const rendered = await renderVideoForSharing();
+    if (!rendered) {
+      showToast("Failed to render video", "error");
+      return;
+    }
+  }
+
   try {
     const shareableUrl = getShareableVideoUrl();
     await navigator.clipboard.writeText(shareableUrl);
@@ -698,6 +749,66 @@ async function copyVideoLink() {
   } catch (err) {
     console.error("Copy error:", err);
     showToast("Failed to copy link", "error");
+  }
+}
+
+/**
+ * Render video for sharing (without downloading)
+ */
+async function renderVideoForSharing() {
+  if (!state.videoId || state.selectedFrame === "none") {
+    return true; // No rendering needed
+  }
+
+  try {
+    // Start the render
+    const response = await fetch(`${API_BASE}/video/render`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        videoId: state.videoId,
+        frameId: state.selectedFrame,
+      }),
+    });
+
+    const data = await response.json();
+
+    if (!data.success) {
+      throw new Error(data.error || "Failed to start render");
+    }
+
+    // Poll for render completion
+    let pollCount = 0;
+    const maxPolls = 300; // 5 minutes max
+
+    while (pollCount < maxPolls) {
+      await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL));
+      
+      const statusResponse = await fetch(`${API_BASE}/video/render/${data.jobId}`);
+      const statusData = await statusResponse.json();
+
+      if (!statusData.success) {
+        throw new Error(statusData.error || "Render failed");
+      }
+
+      if (statusData.status === "completed") {
+        // Store the rendered video info
+        state.lastRenderedJobId = data.jobId;
+        state.lastRenderedUrl = `${API_BASE}/video/download/${data.jobId}`;
+        return true;
+      }
+
+      if (statusData.status === "failed") {
+        throw new Error(statusData.error || "Render failed");
+      }
+
+      pollCount++;
+    }
+
+    throw new Error("Render timeout");
+  } catch (err) {
+    console.error("Render error:", err);
+    return false;
   }
 }
 

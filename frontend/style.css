@@ -449,6 +449,8 @@ input[type="text"]:focus {
   height: 100%;
   object-fit: contain;
   background: #000;
+  position: relative;
+  z-index: 1;
 }
 
 .frame-overlay {
@@ -461,6 +463,17 @@ input[type="text"]:focus {
   background-size: 100% 100%;
   background-repeat: no-repeat;
   background-position: center;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  z-index: 10;
+}
+
+.preview-hint {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin-top: var(--space-sm);
+  font-weight: 500;
 }
 
 /* Frame Selector */
