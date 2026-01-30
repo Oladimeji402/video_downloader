@@ -315,6 +315,18 @@ input[type="text"]:focus {
   font-size: 0.9rem;
 }
 
+.btn-icon {
+  padding: var(--space-sm);
+  min-width: auto;
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+}
+
+.btn-icon .icon {
+  margin: 0;
+}
+
 /* Buttons */
 .btn {
   display: inline-flex;
@@ -449,6 +461,7 @@ input[type="text"]:focus {
   height: 100%;
   object-fit: contain;
   background: #000;
+  display: block;
 }
 
 .frame-overlay {
@@ -457,10 +470,26 @@ input[type="text"]:focus {
   left: 0;
   right: 0;
   bottom: 0;
+  width: 100%;
+  height: 100%;
   pointer-events: none;
   background-size: 100% 100%;
   background-repeat: no-repeat;
   background-position: center;
+  opacity: 0;
+  z-index: 999;
+}
+
+.frame-overlay.visible {
+  opacity: 1 !important;
+}
+
+.preview-hint {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin-top: var(--space-sm);
+  font-weight: 500;
 }
 
 /* Frame Selector */
@@ -569,19 +598,9 @@ input[type="text"]:focus {
   font-size: 0.8rem;
 }
 
-/* Download Section */
-.download-note {
-  color: var(--text-muted);
-  font-size: 0.85rem;
-  text-align: center;
-  margin-top: var(--space-md);
-}
-
 /* Share Section */
 .share-section {
-  margin-top: var(--space-lg);
-  padding-top: var(--space-lg);
-  border-top: 1px solid var(--border-color);
+  margin-bottom: var(--space-lg);
 }
 
 .share-label {
@@ -620,6 +639,23 @@ input[type="text"]:focus {
   border-color: #25d366;
 }
 
+.download-divider {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin: var(--space-md) 0;
+  font-weight: 500;
+  text-transform: lowercase;
+}
+
+/* Download Section */
+.download-note {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  text-align: center;
+  margin-top: var(--space-md);
+}
+
 /* Responsive share buttons for mobile */
 @media (max-width: 480px) {
   .share-buttons {
@@ -628,6 +664,10 @@ input[type="text"]:focus {
   
   .share-buttons .btn {
     width: 100%;
+  }
+  
+  .input-group {
+    gap: var(--space-xs);
   }
 }
 
