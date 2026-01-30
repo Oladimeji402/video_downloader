@@ -56,7 +56,7 @@ router.post("/resolve", (req, res) => {
   if (!url) {
     return res.status(400).json({ 
       success: false, 
-      error: "URL is required" 
+      error: "Please paste a video URL to get started" 
     });
   }
 
@@ -77,7 +77,7 @@ router.post("/resolve", (req, res) => {
   if (!isValidUrl) {
     return res.status(400).json({
       success: false,
-      error: "Please provide a valid TikTok, Instagram, YouTube, Twitter, or Facebook video URL",
+      error: "Unsupported URL. We support TikTok, Instagram, YouTube, Twitter/X, and Facebook videos.",
     });
   }
 
@@ -94,7 +94,7 @@ router.post("/resolve", (req, res) => {
     console.error("Error starting download:", err);
     res.status(500).json({
       success: false,
-      error: "Failed to start download",
+      error: "Could not start download. The video might be private or unavailable.",
     });
   }
 });
