@@ -615,22 +615,36 @@ async function shareVideo() {
     return;
   }
 
+  // Check if rendering is needed
+  const needsRendering = state.selectedFrame !== "none" && !state.lastRenderedJobId;
+
   // If a frame is selected and not yet rendered, render it first
-  if (state.selectedFrame !== "none" && !state.lastRenderedJobId) {
+  if (needsRendering) {
     showToast("Rendering video with frame...", "info");
     const rendered = await renderVideoForSharing();
     if (!rendered) {
       showToast("Failed to render video", "error");
       return;
     }
+    // After async rendering, we've lost the user gesture context
+    // Fall back to download instead of navigator.share()
+    shareVideoAsDownload();
+    return;
   }
 
-  // Get the appropriate video URL
+  // No rendering needed, can use navigator.share() with gesture context intact
+  shareVideoNative();
+}
+
+/**
+ * Share video using native Web Share API (requires active user gesture)
+ */
+function shareVideoNative() {
   let videoUrl;
   let videoBlob;
   
   try {
-    // If a frame was rendered, use the rendered video
+    // If a frame was rendered, use the rendered video URL
     if (state.lastRenderedJobId && state.selectedFrame !== "none") {
       videoUrl = state.lastRenderedUrl;
       showToast("Preparing framed video for sharing...", "info");
@@ -641,63 +655,106 @@ async function shareVideo() {
     }
 
     // Fetch the video as a blob
-    const response = await fetch(videoUrl);
-    if (!response.ok) {
-      console.error(`Failed to fetch video: ${response.status} ${response.statusText}`);
-      throw new Error(`Failed to fetch video: ${response.status}`);
-    }
-    
-    videoBlob = await response.blob();
-    console.log(`Video blob fetched: ${videoBlob.size} bytes`);
-    
-    if (videoBlob.size === 0) {
-      throw new Error("Video blob is empty");
-    }
-    
-    // Check if Web Share API is supported
-    if (navigator.share && navigator.canShare) {
-      const file = new File([videoBlob], `framed-video-${Date.now()}.mp4`, {
-        type: "video/mp4",
-      });
-
-      const shareData = {
-        files: [file],
-        title: "My Framed Video",
-        text: "Check out my framed video!",
-      };
-
-      if (navigator.canShare(shareData)) {
-        try {
-          await navigator.share(shareData);
-          showToast("Video shared successfully!", "success");
-          console.log("Video shared via Web Share API");
-        } catch (shareErr) {
-          if (shareErr.name !== "AbortError") {
-            console.error("Share failed:", shareErr);
-            // Fallback to download if share fails
-            showToast("Share cancelled. Try downloading instead.", "info");
-          }
+    fetch(videoUrl)
+      .then((response) => {
+        if (!response.ok) {
+          console.error(`Failed to fetch video: ${response.status} ${response.statusText}`);
+          throw new Error(`Failed to fetch video: ${response.status}`);
         }
-      } else {
-        throw new Error("Cannot share video files on this device");
-      }
-    } else {
-      // Fallback: download the video instead
-      showToast("Share API not supported. Downloading video instead...", "info");
-      const url = URL.createObjectURL(videoBlob);
-      triggerDownload(url);
-      URL.revokeObjectURL(url);
-    }
+        return response.blob();
+      })
+      .then((blob) => {
+        videoBlob = blob;
+        console.log(`Video blob fetched: ${videoBlob.size} bytes`);
+        
+        if (videoBlob.size === 0) {
+          throw new Error("Video blob is empty");
+        }
+        
+        // Check if Web Share API is supported
+        if (navigator.share && navigator.canShare) {
+          const file = new File([videoBlob], `framed-video-${Date.now()}.mp4`, {
+            type: "video/mp4",
+          });
+
+          const shareData = {
+            files: [file],
+            title: "My Framed Video",
+            text: "Check out my framed video!",
+          };
+
+          if (navigator.canShare(shareData)) {
+            return navigator.share(shareData);
+          } else {
+            throw new Error("Cannot share video files on this device");
+          }
+        } else {
+          throw new Error("Share API not supported on this device");
+        }
+      })
+      .then(() => {
+        showToast("Video shared successfully!", "success");
+        console.log("Video shared via Web Share API");
+      })
+      .catch((err) => {
+        console.error("Share error:", err);
+        if (err.name === "AbortError") {
+          showToast("Share cancelled", "info");
+        } else {
+          showToast("Share not available. Using download instead...", "info");
+          shareVideoAsDownload();
+        }
+      });
   } catch (err) {
     console.error("Share error:", err);
-    if (err.name === "AbortError") {
-      showToast("Share cancelled", "info");
+    showToast("Unable to share. Downloading instead...", "warning");
+    shareVideoAsDownload();
+  }
+}
+
+/**
+ * Share video by triggering download (fallback when gesture context is lost)
+ */
+function shareVideoAsDownload() {
+  let videoUrl;
+  
+  try {
+    // If a frame was rendered, use the rendered video URL
+    if (state.lastRenderedJobId && state.selectedFrame !== "none") {
+      videoUrl = state.lastRenderedUrl;
+      showToast("Downloading framed video...", "info");
     } else {
-      showToast(
-        "Unable to share. Try the Download button instead.",
-        "warning"
-      );
+      // Otherwise, download the original video
+      videoUrl = `${API_BASE}/video/preview/${state.videoId}`;
+      showToast("Downloading video...", "info");
     }
+
+    // Fetch the video as a blob and trigger download
+    fetch(videoUrl)
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`Failed to fetch video: ${response.status}`);
+        }
+        return response.blob();
+      })
+      .then((blob) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `framed-video-${Date.now()}.mp4`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        showToast("Download started!", "success");
+      })
+      .catch((err) => {
+        console.error("Download error:", err);
+        showToast("Failed to download video", "error");
+      });
+  } catch (err) {
+    console.error("Share error:", err);
+    showToast("Unable to share or download", "error");
   }
 }
 
