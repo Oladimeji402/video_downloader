@@ -270,8 +270,8 @@ function updateFramePreview(frameId) {
 
   // Reset completely
   overlay.style.backgroundImage = "";
-  overlay.style.opacity = "0";
-  overlay.style.display = "block";
+  overlay.style.backgroundColor = "";
+  overlay.classList.remove("visible");
   preview.removeAttribute("data-frame");
 
   if (frameId === "none") {
@@ -285,20 +285,22 @@ function updateFramePreview(frameId) {
   if (cssFrames.includes(frameId)) {
     console.log("CSS frame:", frameId);
     preview.setAttribute("data-frame", frameId);
-    overlay.style.opacity = "1";
+    overlay.classList.add("visible");
   } else {
     // Image frame - show it over the video
     const frame = state.frames.find((f) => f.id === frameId);
     if (frame) {
       console.log("Image frame found:", frame);
-      const imageUrl = `${window.location.origin}${frame.path}`;
+      // Encode the URL to handle spaces and special characters
+      const imageUrl = `${window.location.origin}${encodeURI(frame.path)}`;
       console.log("Loading frame image from:", imageUrl);
-      overlay.style.backgroundImage = `url(${imageUrl})`;
-      overlay.style.backgroundSize = "100% 100%";
-      overlay.style.backgroundPosition = "center";
-      overlay.style.backgroundRepeat = "no-repeat";
-      overlay.style.opacity = "1";
-      console.log("Frame overlay opacity set to 1");
+      
+      // Set background image
+      overlay.style.backgroundImage = `url("${imageUrl}")`;
+      overlay.classList.add("visible");
+      
+      console.log("Frame overlay class added: visible");
+      console.log("Overlay classList:", overlay.classList);
     } else {
       console.log("Frame not found in state.frames:", frameId);
     }
