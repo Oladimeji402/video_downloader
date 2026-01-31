@@ -6,8 +6,9 @@
 // ===========================================
 // Configuration
 // ===========================================
-// API base URL - use environment variable or fallback to relative path
-const API_BASE = process.env.REACT_APP_API_URL || window.location.origin + "/api";
+// API base URL - will be replaced during deployment
+// For local: uses same origin. For production: set via window.ENV or use Railway URL
+const API_BASE = window.ENV?.API_URL || "http://localhost:4000/api";
 const POLL_INTERVAL = 1000; // 1 second
 
 // ===========================================
