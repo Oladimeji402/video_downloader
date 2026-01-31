@@ -687,12 +687,10 @@ function showVideoPreview() {
     elements.previewSection.scrollIntoView({ behavior: "smooth", block: "start" });
   }, 100);
   
-  // Auto-start rendering if a frame is already selected (from pre-selection)
-  // This ensures framed video is ready by the time user clicks Share
+  // Update frame preview if a frame is pre-selected
   if (state.selectedFrame && state.selectedFrame !== "none") {
-    console.log("Video loaded with frame pre-selected, starting auto-render:", state.selectedFrame);
+    console.log("Video loaded with frame pre-selected:", state.selectedFrame);
     updateFramePreview(state.selectedFrame);
-    autoStartRenderForFrame(state.selectedFrame);
   }
 }
 
