@@ -24,9 +24,8 @@ COPY backend/package*.json ./backend/
 WORKDIR /app/backend
 RUN npm install --omit=dev
 
-# Copy application files
+# Copy application files (backend only - frontend is on Vercel)
 COPY backend/ ./
-COPY frontend/ ../frontend/
 
 # Create temp directories
 RUN mkdir -p temp/downloads temp/rendered temp/uploads
