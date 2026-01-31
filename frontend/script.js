@@ -942,8 +942,8 @@ async function renderVideoInBackground() {
     const jobId = data.jobId;
     console.log("Polling for job:", jobId);
 
-    // Poll for render completion
-    return pollRenderJob(jobId);
+    // Poll for render completion with timeout
+    return await pollRenderJobWithTimeout(jobId, 300000); // 5 minute timeout
 
   } catch (err) {
     console.error("Background render error:", err);
@@ -952,12 +952,24 @@ async function renderVideoInBackground() {
 }
 
 /**
+ * Poll for render job completion with timeout
+ */
+async function pollRenderJobWithTimeout(jobId, timeoutMs) {
+  return Promise.race([
+    pollRenderJob(jobId),
+    new Promise((_, reject) => 
+      setTimeout(() => reject(new Error("Render timeout - video is taking too long to process")), timeoutMs)
+    )
+  ]);
+}
+
+/**
  * Poll for render job completion
  */
 async function pollRenderJob(jobId) {
   let pollCount = 0;
-  const maxPolls = 300; // 5 minutes max
-  let pollDelay = 2000; // Start with 2 seconds
+  const maxPolls = 300; // 5 minutes max with 1 second delays
+  let pollDelay = 1000; // Start with 1 second
 
   while (pollCount < maxPolls) {
     await new Promise(resolve => setTimeout(resolve, pollDelay));
@@ -967,33 +979,61 @@ async function pollRenderJob(jobId) {
       
       // Handle rate limiting
       if (statusResponse.status === 429) {
-        pollDelay = Math.min(pollDelay * 2, 30000);
+        pollDelay = Math.min(pollDelay * 1.5, 10000);
         console.warn(`Rate limited. Next poll in ${pollDelay}ms`);
         pollCount++;
         continue;
       }
 
-      if (!statusResponse.ok) {
-        throw new Error(`Status check failed with status ${statusResponse.status}`);
+      // Handle job not found (hasn't been stored yet)
+      if (statusResponse.status === 404) {
+        console.warn(`Job ${jobId} not yet available, retrying...`);
+        // Increase poll delay gradually if job not found
+        pollDelay = Math.min(pollDelay + 200, 3000);
+        pollCount++;
+        continue;
       }
 
-      const statusData = await statusResponse.json();
+      if (!statusResponse.ok) {
+        console.warn(`Status check returned ${statusResponse.status}, retrying...`);
+        pollCount++;
+        continue;
+      }
+
+      let statusData;
+      try {
+        statusData = await statusResponse.json();
+      } catch (parseErr) {
+        console.error(`Failed to parse response: ${parseErr.message}`);
+        pollCount++;
+        continue;
+      }
       
+      if (!statusData) {
+        console.warn(`Empty status response, retrying...`);
+        pollCount++;
+        continue;
+      }
+
       if (!statusData.success) {
         throw new Error(statusData.error || "Render failed");
       }
 
       // Reset poll delay on successful response
-      if (pollDelay > 2000) {
-        pollDelay = 2000;
+      if (pollDelay > 1000) {
+        pollDelay = 1000;
       }
 
-      if (statusData.status === "completed") {
+      const status = statusData.status;
+      const errorMsg = statusData.error ? ` - ${statusData.error}` : '';
+      console.log(`Render job status: ${status} (${statusData.progress || 0}%)${errorMsg}`);
+
+      if (status === "completed") {
         console.log("Render completed successfully!");
         return jobId;
       }
 
-      if (statusData.status === "failed") {
+      if (status === "failed") {
         throw new Error(statusData.error || "Render job failed");
       }
 
@@ -1002,14 +1042,16 @@ async function pollRenderJob(jobId) {
 
     } catch (pollErr) {
       console.error(`Poll error: ${pollErr.message}`);
-      pollCount++;
-      if (pollCount >= maxPolls) {
-        throw new Error("Render timeout after 5 minutes");
+      // Re-throw errors that are not transient
+      if (pollErr.message.includes("Render") || pollErr.message.includes("failed")) {
+        throw pollErr;
       }
+      // For transient errors, continue retrying
+      pollCount++;
     }
   }
 
-  throw new Error("Render timeout after 5 minutes");
+  throw new Error("Render timeout after 5 minutes - video may be too large or your server is overloaded");
 }
 
 /**
@@ -1228,15 +1270,23 @@ async function shareToWhatsApp() {
     // If frame is selected and not yet rendered, render it first
     if (needsRendering) {
       showShareLoadingModal(true);
+      console.log(`Starting render with frameId: "${state.selectedFrame}"`);
       
-      // Render the video with the frame
-      const jobId = await renderVideoInBackground();
-      if (jobId) {
-        state.lastRenderedJobId = jobId;
-        state.lastRenderedUrl = `${API_BASE}/video/download/${jobId}`;
-        videoUrl = state.lastRenderedUrl;
-      } else {
-        throw new Error("Failed to render video");
+      try {
+        // Render the video with the frame - this will block until complete
+        const jobId = await renderVideoInBackground();
+        if (jobId) {
+          state.lastRenderedJobId = jobId;
+          state.lastRenderedUrl = `${API_BASE}/video/download/${jobId}`;
+          videoUrl = state.lastRenderedUrl;
+          console.log("Render complete, fetching rendered video...");
+        } else {
+          throw new Error("Failed to start render job");
+        }
+      } catch (renderErr) {
+        closeShareLoadingModal();
+        showToast(renderErr.message || "Failed to render video", "error");
+        return;
       }
     } else {
       // Use already rendered video or original video
@@ -1259,7 +1309,7 @@ async function shareToWhatsApp() {
     console.log(`Video blob fetched: ${blob.size} bytes`);
 
     if (blob.size === 0) {
-      throw new Error("Video blob is empty");
+      throw new Error("Video blob is empty - render may have failed");
     }
 
     closeShareLoadingModal();

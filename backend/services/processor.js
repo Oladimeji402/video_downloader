@@ -25,6 +25,11 @@ const __dirname = path.dirname(__filename);
 const FRAMES_DIR = path.join(__dirname, "..", "frames");
 const RENDERED_DIR = path.join(__dirname, "..", "temp", "rendered");
 
+// Ensure rendered directory exists
+if (!fs.existsSync(RENDERED_DIR)) {
+  fs.mkdirSync(RENDERED_DIR, { recursive: true });
+}
+
 // In-memory render job store (fallback when Redis unavailable)
 const renderJobs = new Map();
 
@@ -44,18 +49,26 @@ async function processRender(jobId, videoPath, frameId) {
     const framePath = getFramePath(frameId);
 
     if (!framePath) {
-      throw new Error(`Frame "${frameId}" not found`);
+      logger.error({ jobId, frameId, framesDir: FRAMES_DIR }, "Frame file not found");
+      throw new Error(`Frame "${frameId}" not found. Check that the frame file exists in the frames directory.`);
     }
 
     if (!fs.existsSync(videoPath)) {
       throw new Error("Source video not found");
     }
 
+    logger.info({ jobId, videoPath, framePath }, "Probing video metadata");
+    
     // Get video dimensions
     const metadata = await new Promise((resolve, reject) => {
       ffmpeg.ffprobe(videoPath, (err, data) => {
-        if (err) reject(err);
-        else resolve(data);
+        if (err) {
+          logger.error({ jobId, error: err.message }, "FFProbe failed");
+          reject(err);
+        } else {
+          logger.info({ jobId }, "FFProbe completed");
+          resolve(data);
+        }
       });
     });
 
@@ -67,6 +80,8 @@ async function processRender(jobId, videoPath, frameId) {
     let width = videoStream.width;
     let height = videoStream.height;
     const duration = parseFloat(metadata.format.duration) || 0;
+    
+    logger.info({ jobId, width, height, duration }, "Video dimensions determined");
 
     // Optimize resolution for WhatsApp (max 720p for fast sharing)
     // WhatsApp re-compresses anyway, so smaller = faster upload
@@ -75,62 +90,112 @@ async function processRender(jobId, videoPath, frameId) {
       const scale = maxDimension / Math.max(width, height);
       width = Math.round(width * scale / 2) * 2; // Ensure even dimensions
       height = Math.round(height * scale / 2) * 2;
+      logger.info({ jobId, optimizedWidth: width, optimizedHeight: height }, "Resolution optimized");
     }
 
     // Pre-process frame with Sharp (10x faster than FFmpeg scaling)
-    const overlayBuffer = await sharp(framePath)
+    logger.info({ jobId }, "Processing frame with Sharp");
+    const overlayPath = path.join(RENDERED_DIR, `overlay-${jobId}.png`);
+    
+    await sharp(framePath)
       .resize(width, height, {
         fit: "cover",
         withoutEnlargement: true,
       })
-      .toBuffer();
+      .ensureAlpha() // Ensure RGBA format
+      .png()
+      .toFile(overlayPath);
+    
+    logger.info({ jobId, overlayPath }, "Frame processed and saved");
 
     // Render with FFmpeg - optimized for FAST sharing (smaller files)
+    logger.info({ jobId, outputPath }, "Starting FFmpeg encoding");
+    
     await new Promise((resolve, reject) => {
-      ffmpeg()
-        .input(videoPath)
-        .input(overlayBuffer, { format: "rgba" })
-        .complexFilter([
-          // Scale video down for faster processing + smaller file
-          `[0:v]scale=${width}:${height}:flags=fast_bilinear[scaled]`,
-          "[1:v]format=rgba[frame]",
-          "[scaled][frame]overlay=0:0[out]",
-        ])
-        .outputOptions([
-          "-map", "[out]",
-          "-map", "0:a?",
-          "-c:v", "libx264",
-          "-preset", "veryfast", // Good balance of speed and quality
-          "-crf", "30", // Higher = smaller file, faster upload
-          "-profile:v", "baseline", // Maximum compatibility
-          "-level", "3.0",
-          "-pix_fmt", "yuv420p",
-          "-c:a", "aac",
-          "-b:a", "64k", // Lower audio = smaller file
-          "-ar", "44100",
-          "-ac", "1", // Mono audio for smaller size
-          "-movflags", "+faststart",
-          "-threads", "0",
-          "-maxrate", "2M", // Cap bitrate for smaller files
-          "-bufsize", "4M",
-        ])
-        .output(outputPath)
-        .on("progress", (progress) => {
-          if (duration > 0 && progress.timemark && jobData) {
-            const timeParts = progress.timemark.split(":");
-            const seconds =
-              parseFloat(timeParts[0]) * 3600 +
-              parseFloat(timeParts[1]) * 60 +
-              parseFloat(timeParts[2]);
-            jobData.progress = Math.min(99, Math.round((seconds / duration) * 100));
-          }
-        })
-        .on("end", resolve)
-        .on("error", reject)
-        .run();
+      try {
+        const ffmpegCmd = ffmpeg()
+          .input(videoPath)
+          .input(overlayPath);
+
+        if (!ffmpegCmd) {
+          throw new Error("Failed to initialize FFmpeg command");
+        }
+
+        ffmpegCmd
+          .complexFilter([
+            // Scale video down for faster processing + smaller file
+            `[0:v]scale=${width}:${height}:flags=fast_bilinear[scaled]`,
+            "[1:v]format=rgba[frame]",
+            "[scaled][frame]overlay=0:0[out]",
+          ])
+          .outputOptions([
+            "-map", "[out]",
+            "-map", "0:a?",
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-crf", "30",
+            "-profile:v", "baseline",
+            "-level", "3.0",
+            "-pix_fmt", "yuv420p",
+            "-c:a", "aac",
+            "-b:a", "64k",
+            "-ar", "44100",
+            "-ac", "1",
+            "-movflags", "+faststart",
+            "-threads", "0",
+            "-maxrate", "2M",
+            "-bufsize", "4M",
+          ])
+          .output(outputPath)
+          .on("start", (cmd) => {
+            logger.info({ jobId, cmd }, "FFmpeg process started");
+          })
+          .on("progress", (progress) => {
+            if (duration > 0 && progress.timemark && jobData) {
+              const timeParts = progress.timemark.split(":");
+              const seconds =
+                parseFloat(timeParts[0]) * 3600 +
+                parseFloat(timeParts[1]) * 60 +
+                parseFloat(timeParts[2]);
+              jobData.progress = Math.min(99, Math.round((seconds / duration) * 100));
+              logger.debug({ jobId, progress: jobData.progress }, "Encoding progress");
+            }
+          })
+          .on("end", () => {
+            logger.info({ jobId }, "FFmpeg process ended successfully");
+            // Clean up overlay file
+            try {
+              fs.unlinkSync(overlayPath);
+              logger.debug({ jobId }, "Overlay file cleaned up");
+            } catch (err) {
+              logger.warn({ jobId, error: err.message }, "Failed to clean up overlay file");
+            }
+            resolve();
+          })
+          .on("error", (err) => {
+            logger.error({ jobId, error: err.message, stderr: err.stderr }, "FFmpeg error");
+            // Clean up overlay file on error
+            try {
+              fs.unlinkSync(overlayPath);
+            } catch (cleanupErr) {
+              logger.debug({ jobId }, "Overlay file cleanup skipped");
+            }
+            reject(new Error(`FFmpeg encoding failed: ${err.message}`));
+          })
+          .run();
+      } catch (err) {
+        logger.error({ jobId, error: err.message }, "FFmpeg command setup failed");
+        // Clean up overlay file on error
+        try {
+          fs.unlinkSync(overlayPath);
+        } catch (cleanupErr) {
+          logger.debug({ jobId }, "Overlay file cleanup skipped");
+        }
+        reject(err);
+      }
     });
 
-    logger.info({ jobId }, "Render completed");
+    logger.info({ jobId, outputPath }, "Render completed");
 
     if (jobData) {
       jobData.status = "completed";
@@ -239,8 +304,13 @@ function formatFrameName(id) {
  * @returns {string|null}
  */
 export function getFramePath(frameId) {
+  if (!frameId) {
+    return null;
+  }
+
   const extensions = [".png", ".jpg", ".jpeg"];
   
+  // First, try exact match with extensions
   for (const ext of extensions) {
     const framePath = path.join(FRAMES_DIR, `${frameId}${ext}`);
     if (fs.existsSync(framePath)) {
@@ -254,6 +324,24 @@ export function getFramePath(frameId) {
     if (fs.existsSync(framePath)) {
       return framePath;
     }
+  }
+
+  // If direct match fails, search all files for a match
+  // This handles frame IDs that might be partial names or have special characters
+  try {
+    const files = fs.readdirSync(FRAMES_DIR);
+    for (const file of files) {
+      if (file.match(/\.(png|jpg|jpeg)$/i)) {
+        const fileBasename = path.basename(file, path.extname(file));
+        // Check if frameId matches the file basename (case-insensitive)
+        if (fileBasename.toLowerCase() === frameId.toLowerCase()) {
+          const framePath = path.join(FRAMES_DIR, file);
+          return framePath;
+        }
+      }
+    }
+  } catch (err) {
+    logger.warn({ frameId, error: err.message }, "Error searching for frame file");
   }
 
   return null;
@@ -298,10 +386,14 @@ export async function startRender(videoPath, frameId) {
     } else {
       // Direct processing (no Redis)
       logger.info({ jobId }, "Processing render directly (no queue)");
-      processRender(jobId, videoPath, frameId).catch(err => {
-        logger.error({ jobId, error: err.message }, "Direct render failed");
-      });
-    }
+    const renderPromise = processRender(jobId, videoPath, frameId);
+    
+    // Handle errors from async render
+    renderPromise.catch(err => {
+      logger.error({ jobId, error: err.message, stack: err.stack }, "Direct render failed");
+      // Error already logged in processRender, no need to repeat
+    });
+  }
   } catch (err) {
     logger.error({ jobId, error: err.message }, "Failed to start render");
     jobData.status = "failed";

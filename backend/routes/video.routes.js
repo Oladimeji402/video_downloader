@@ -332,6 +332,8 @@ router.post("/render", async (req, res) => {
     });
   }
 
+  console.log(`[RENDER] Received render request: videoId=${videoId}, frameId="${frameId}"`);
+
   const videoPath = downloader.getVideoPath(videoId);
   
   if (!videoPath) {
@@ -344,12 +346,14 @@ router.post("/render", async (req, res) => {
   const result = await processor.startRender(videoPath, frameId);
 
   if (result.error) {
+    console.error(`[RENDER] Render failed for frameId="${frameId}": ${result.error}`);
     return res.status(400).json({
       success: false,
       error: result.error,
     });
   }
 
+  console.log(`[RENDER] Render started: jobId=${result.jobId}, frameId="${frameId}"`);
   res.json({
     success: true,
     jobId: result.jobId,
