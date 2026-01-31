@@ -67,9 +67,11 @@ let state = {
   isProcessing: false,
   lastRenderedJobId: null,
   lastRenderedUrl: null,
-  isAutoRenderInProgress: false, // NEW: Prevent duplicate auto-renders
-  pendingRenderKey: null, // Prevent duplicate render requests
+  renderedVideoBlob: null, // Cache rendered video blob
 };
+
+// Frame image preload cache
+const frameImageCache = new Map();
 
 // ===========================================
 // URL Validation Helper
@@ -225,8 +227,10 @@ async function loadFrames() {
       renderFrameOptions();
       elements.noFramesMsg.classList.add("hidden");
       
+      // Preload frame images for instant switching
+      preloadAllFrames();
+      
       // Pre-select first frame for better UX (users usually want a frame)
-      // This means render will start automatically when video loads
       if (state.frames.length > 0) {
         state.selectedFrame = state.frames[0].id;
         // Update UI to show selection
@@ -235,6 +239,13 @@ async function loadFrames() {
           if (firstFrameOption) {
             document.querySelectorAll(".frame-option").forEach(opt => opt.classList.remove("selected"));
             firstFrameOption.classList.add("selected");
+            
+            // Update preview overlay
+            const frameImg = `${API_BASE}/frames/${state.frames[0].id}.png`;
+            elements.videoPreview.style.backgroundImage = `url(${frameImg})`;
+            elements.videoPreview.style.backgroundSize = "contain";
+            elements.videoPreview.style.backgroundPosition = "center";
+            elements.videoPreview.style.backgroundRepeat = "no-repeat";
           }
         }, 100);
       }
@@ -276,7 +287,7 @@ function renderFrameOptions() {
 }
 
 /**
- * Select a frame
+ * Select a frame - INSTANT preview, NO rendering
  */
 function selectFrame(frameId) {
   console.log("Selecting frame:", frameId);
@@ -288,33 +299,28 @@ function selectFrame(frameId) {
   
   state.selectedFrame = frameId;
   
-  // Reset rendered state when changing frames
+  // Clear cached render when changing frames
+  state.renderedVideoBlob = null;
   state.lastRenderedJobId = null;
   state.lastRenderedUrl = null;
-  
-  // Cancel any in-progress render for the OLD frame
-  // by clearing the flags - the completion handler will check if frame changed
-  state.isAutoRenderInProgress = false;
-  state.pendingRenderKey = null;
-  
-  // Hide any existing render indicator (old render is now stale)
-  const indicator = document.getElementById("renderIndicator");
-  if (indicator) {
-    indicator.style.display = "none";
-  }
 
   // Update UI
   document.querySelectorAll(".frame-option").forEach((opt) => {
     opt.classList.toggle("selected", opt.dataset.frame === frameId);
   });
 
-  // Update preview overlay
+  // Update preview overlay INSTANTLY (no backend call)
   updateFramePreview(frameId);
-
-  // Auto-start rendering in background if frame is selected and video is loaded
-  if (frameId !== "none" && state.videoId) {
-    console.log("Auto-starting render for selected frame:", frameId);
-    autoStartRenderForFrame(frameId);
+  
+  // Preload frame image for smooth switching
+  if (frameId !== "none") {
+    preloadFrameImage(frameId);
+  }
+  
+  // Enable download/share buttons when frame is selected
+  if (frameId !== "none") {
+    elements.downloadBtn.disabled = false;
+    elements.shareBtn.disabled = false;
   }
 }
 
@@ -366,152 +372,96 @@ function updateFramePreview(frameId) {
 }
 
 /**
- * Auto-start rendering when a frame is selected
- * This ensures the framed video is ready when user clicks Share
+ * Preload frame image for faster switching
  */
-async function autoStartRenderForFrame(frameId) {
-  // Create unique key for this render request
-  const renderKey = `${state.videoId}-${frameId}`;
-  
-  // If already rendering this exact combination, skip
-  if (state.pendingRenderKey === renderKey) {
-    console.log("Same render already in progress, skipping");
-    return;
+function preloadFrameImage(frameId) {
+  if (frameImageCache.has(frameId)) {
+    return; // Already cached
   }
   
-  // If already rendered this frame, don't start again
-  if (state.lastRenderedJobId && state.selectedFrame === frameId) {
-    console.log("Frame already rendered, skipping auto-render");
-    return;
+  const frame = state.frames.find((f) => f.id === frameId);
+  if (frame && frame.path) {
+    const img = new Image();
+    img.src = `${window.location.origin}${frame.path}`;
+    frameImageCache.set(frameId, img);
+    console.log("Preloaded frame:", frameId);
   }
+}
 
-  // If auto-render is already in progress, don't start another
-  if (state.isAutoRenderInProgress) {
-    console.log("Auto-render already in progress, skipping");
-    return;
+/**
+ * Preload all available frames for instant switching
+ */
+function preloadAllFrames() {
+  state.frames.forEach(frame => {
+    if (frame.id && frame.id !== "none") {
+      preloadFrameImage(frame.id);
+    }
+  });
+  console.log(`Preloaded ${state.frames.length} frames`);
+}
+
+/**
+ * Render video with selected frame (called only on Download/Share)
+ * Returns blob of rendered video
+ */
+async function renderVideoWithFrame(progressCallback) {
+  if (!state.videoId || state.selectedFrame === "none") {
+    throw new Error("No video or frame selected");
   }
-
-  // Don't auto-render during downloads or other processing
-  if (state.isProcessing) {
-    console.log("Processing in progress, skipping auto-render");
-    return;
+  
+  // Check if already rendered
+  if (state.renderedVideoBlob) {
+    console.log("Using cached rendered video");
+    return state.renderedVideoBlob;
   }
-
-  // Mark as in progress to prevent duplicates
-  state.isAutoRenderInProgress = true;
-  state.pendingRenderKey = renderKey;
-
-  try {
-    console.log("Starting auto-render for frame:", frameId);
-    showToast("Preparing framed video...", "info");
+  
+  console.log("Starting render...");
+  
+  // Start render
+  const response = await fetch(`${API_BASE}/video/render`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      videoId: state.videoId,
+      frameId: state.selectedFrame,
+    }),
+  });
+  
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || "Rendering failed");
+  }
+  
+  const { jobId } = await response.json();
+  console.log("Render started, jobId:", jobId);
+  
+  // Poll for completion
+  while (true) {
+    await new Promise(resolve => setTimeout(resolve, 1000));
     
-    // Show a subtle render indicator (top of download section)
-    const renderIndicator = document.getElementById("renderIndicator") || createRenderIndicator();
-    renderIndicator.style.display = "flex";
+    const statusResponse = await fetch(`${API_BASE}/video/render/${jobId}`);
+    const status = await statusResponse.json();
     
-    // Start the render with retry logic for 429
-    let retryCount = 0;
-    const maxRetries = 3;
-    let response;
-
-    while (retryCount < maxRetries) {
-      try {
-        response = await fetch(`${API_BASE}/video/render`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            videoId: state.videoId,
-            frameId: frameId,
-          }),
-        });
-
-        // Handle rate limiting with exponential backoff
-        if (response.status === 429) {
-          retryCount++;
-          if (retryCount < maxRetries) {
-            const delayMs = Math.pow(2, retryCount) * 1000; // 2s, 4s, 8s
-            console.warn(`Rate limited (429). Retrying in ${delayMs}ms (attempt ${retryCount}/${maxRetries})`);
-            await new Promise(resolve => setTimeout(resolve, delayMs));
-            continue; // Retry
-          } else {
-            throw new Error("Too many requests. Server is busy. Please try again in a moment.");
-          }
-        }
-
-        // Success or other error - break retry loop
-        break;
-      } catch (fetchErr) {
-        if (retryCount < maxRetries - 1) {
-          console.warn(`Fetch error, retrying... ${fetchErr.message}`);
-          retryCount++;
-          await new Promise(resolve => setTimeout(resolve, 1000));
-        } else {
-          throw fetchErr;
-        }
-      }
+    if (status.status === "completed") {
+      console.log("Render completed!");
+      
+      // Download rendered video
+      const videoResponse = await fetch(`${API_BASE}/video/download/${jobId}`);
+      const blob = await videoResponse.blob();
+      
+      // Cache it
+      state.renderedVideoBlob = blob;
+      state.lastRenderedJobId = jobId;
+      state.lastRenderedUrl = `${API_BASE}/video/download/${jobId}`;
+      
+      return blob;
+    } else if (status.status === "failed") {
+      throw new Error(status.error || "Rendering failed");
     }
-
-    if (!response.ok) {
-      throw new Error(`Render request failed with status ${response.status}`);
-    }
-
-    const data = await response.json();
-    console.log("Auto-render started:", data);
-
-    if (!data.success) {
-      throw new Error(data.error || "Failed to start render");
-    }
-
-    // Poll for completion - but track which frame this render is for
-    const renderingForFrame = frameId;
     
-    pollRenderJob(data.jobId)
-      .then((jobId) => {
-        // IMPORTANT: Only accept result if user hasn't switched frames
-        if (state.selectedFrame !== renderingForFrame) {
-          console.log(`Render completed for ${renderingForFrame} but user switched to ${state.selectedFrame}, ignoring`);
-          state.isAutoRenderInProgress = false;
-          state.pendingRenderKey = null;
-          return;
-        }
-        
-        console.log("Auto-render completed, jobId:", jobId);
-        state.lastRenderedJobId = jobId;
-        state.lastRenderedUrl = `${API_BASE}/video/download/${jobId}`;
-        state.isAutoRenderInProgress = false;
-        state.pendingRenderKey = null;
-        
-        // Hide render indicator
-        const indicator = document.getElementById("renderIndicator");
-        if (indicator) {
-          indicator.style.display = "none";
-        }
-        
-        showToast("Framed video ready!", "success");
-      })
-      .catch((err) => {
-        console.error("Auto-render failed:", err);
-        state.isAutoRenderInProgress = false;
-        state.pendingRenderKey = null;
-        showToast(err.message || "Frame preparation failed (original will be shared)", "warning");
-        
-        // Hide render indicator
-        const indicator = document.getElementById("renderIndicator");
-        if (indicator) {
-          indicator.style.display = "none";
-        }
-      });
-
-  } catch (err) {
-    console.error("Auto-render error:", err);
-    state.isAutoRenderInProgress = false;
-    state.pendingRenderKey = null;
-    showToast(err.message || "Frame preparation failed", "warning");
-    
-    // Hide render indicator
-    const indicator = document.getElementById("renderIndicator");
-    if (indicator) {
-      indicator.style.display = "none";
+    // Update progress
+    if (progressCallback && status.progress) {
+      progressCallback(status.progress);
     }
   }
 }
@@ -746,7 +696,7 @@ function showVideoPreview() {
 }
 
 /**
- * Download framed video
+ * Download framed video - renders on-demand
  */
 async function downloadVideo() {
   if (!state.videoId) {
@@ -761,73 +711,50 @@ async function downloadVideo() {
   }
 
   state.isProcessing = true;
-  setButtonLoading(elements.downloadBtn, true);
-  elements.renderProgress.style.width = "0%";
+  setButtonLoading(elements.downloadBtn, true, `
+    <svg class="icon spinner" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none" opacity="0.25"/>
+      <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" opacity="0.75"/>
+    </svg>
+    <span>Rendering...</span>
+  `);
 
   try {
-    // Start the render
-    const response = await fetch(`${API_BASE}/video/render`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        videoId: state.videoId,
-        frameId: state.selectedFrame,
-      }),
+    // Render video with selected frame
+    const blob = await renderVideoWithFrame((progress) => {
+      elements.downloadBtn.innerHTML = `
+        <svg class="icon spinner" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none" opacity="0.25"/>
+          <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" opacity="0.75"/>
+        </svg>
+        <span>Rendering ${progress}%</span>
+      `;
     });
+    
+    // Trigger download
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `framed-video-${Date.now()}.mp4`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
 
-    const data = await response.json();
-
-    if (!data.success) {
-      throw new Error(data.error || "Failed to start render");
-    }
-
-    elements.renderStatusText.textContent = "Rendering video...";
-
-    // Poll for render status
-    pollStatus(
-      `/video/render/${data.jobId}`,
-      elements.renderStatus,
-      elements.renderStatusText,
-      elements.renderProgress,
-      // On complete
-      () => {
-        // Store the rendered video info for sharing
-        state.lastRenderedJobId = data.jobId;
-        state.lastRenderedUrl = `${API_BASE}/video/download/${data.jobId}`;
-        
-        // Trigger download
-        triggerDownload(state.lastRenderedUrl);
-        showToast("Video rendered! Download starting...", "success");
-        state.isProcessing = false;
-        setButtonLoading(elements.downloadBtn, false, `
-          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-            <polyline points="7 10 12 15 17 10"></polyline>
-            <line x1="12" y1="15" x2="12" y2="3"></line>
-          </svg>
-          <span>Download Framed Video</span>
-        `);
-      },
-      // On error
-      (err) => {
-        showToast(err.message || "Failed to render video", "error");
-        state.isProcessing = false;
-        setButtonLoading(elements.downloadBtn, false, `
-          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-            <polyline points="7 10 12 15 17 10"></polyline>
-            <line x1="12" y1="15" x2="12" y2="3"></line>
-          </svg>
-          <span>Download Framed Video</span>
-        `);
-      }
-    );
+    showToast("Download started!", "success");
   } catch (err) {
-    console.error("Render error:", err);
-    showToast(err.message || "Failed to connect to server", "error");
+    console.error("Download error:", err);
+    showToast(err.message || "Failed to render video", "error");
+  } finally {
     state.isProcessing = false;
-    setButtonLoading(elements.downloadBtn, false);
-    elements.renderStatus.classList.add("hidden");
+    setButtonLoading(elements.downloadBtn, false, `
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+        <polyline points="7 10 12 15 17 10"></polyline>
+        <line x1="12" y1="15" x2="12" y2="3"></line>
+      </svg>
+      <span>Download Framed Video</span>
+    `);
   }
 }
 
@@ -884,10 +811,8 @@ function triggerDownload(url) {
 }
 
 /**
- * Share video using Web Share API with in-memory Blob
- * IMPROVED: Shares immediately without blocking on render
- * - If rendered video available: share it
- * - If not: share original and render in background for next time
+ * Share video using Web Share API
+ * Renders on-demand if frame is selected
  */
 async function shareVideo() {
   if (!state.videoId) {
@@ -895,60 +820,44 @@ async function shareVideo() {
     return;
   }
 
-  // Determine which video to share NOW (don't wait for render)
-  // Priority: rendered version > original
-  let videoUrl;
-  let isRenderedVersion = false;
-  
-  if (state.lastRenderedJobId && state.selectedFrame !== "none") {
-    // Rendered version available - use it
-    videoUrl = state.lastRenderedUrl;
-    isRenderedVersion = true;
-  } else {
-    // Use original - share immediately, don't block
-    videoUrl = `${API_BASE}/video/preview/${state.videoId}`;
-  }
-
-  // Show brief loading (just for fetch, not render)
-  showShareLoadingModal(false);
-
   try {
-    // Fetch video blob quickly
-    console.log("Fetching video for sharing:", videoUrl);
-    const response = await fetch(videoUrl);
+    let blob;
     
-    if (!response.ok) {
-      throw new Error(`Failed to fetch video: ${response.status}`);
+    // If frame is selected, render it first
+    if (state.selectedFrame !== "none") {
+      showShareLoadingModal(true);
+      
+      blob = await renderVideoWithFrame((progress) => {
+        // Update modal with progress
+        const modal = document.querySelector('.share-loading-modal');
+        if (modal) {
+          const text = modal.querySelector('p');
+          if (text) {
+            text.textContent = `Rendering with frame... ${progress}%`;
+          }
+        }
+      });
+      
+      closeShareLoadingModal();
+    } else {
+      // No frame, use original video
+      showShareLoadingModal(false);
+      
+      const response = await fetch(`${API_BASE}/video/preview/${state.videoId}`);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch video: ${response.status}`);
+      }
+      blob = await response.blob();
+      
+      closeShareLoadingModal();
     }
-
-    let blob = await response.blob();
-    console.log(`Video blob fetched: ${blob.size} bytes`);
 
     if (blob.size === 0) {
       throw new Error("Video blob is empty");
     }
 
-    // Close modal before sharing (share sheet will appear)
-    closeShareLoadingModal();
-
-    // Share IMMEDIATELY - don't wait for anything
+    // Share the video
     await shareBlob(blob);
-    
-    // If frame selected but not rendered, start render in background for NEXT share
-    if (state.selectedFrame !== "none" && !state.lastRenderedJobId && !state.isAutoRenderInProgress) {
-      console.log("Starting background render for next share...");
-      renderVideoInBackground().then((renderedJobId) => {
-        if (renderedJobId) {
-          console.log("Background render completed, ready for next share:", renderedJobId);
-          state.lastRenderedJobId = renderedJobId;
-          state.lastRenderedUrl = `${API_BASE}/video/download/${renderedJobId}`;
-          showToast("Framed version ready for next share!", "success");
-        }
-      }).catch((err) => {
-        console.error("Background render failed:", err);
-        // Don't show error - user already shared successfully
-      });
-    }
 
   } catch (err) {
     console.error("Share error:", err);
@@ -1033,8 +942,8 @@ async function renderVideoInBackground() {
     const jobId = data.jobId;
     console.log("Polling for job:", jobId);
 
-    // Poll for render completion
-    return pollRenderJob(jobId);
+    // Poll for render completion with timeout
+    return await pollRenderJobWithTimeout(jobId, 300000); // 5 minute timeout
 
   } catch (err) {
     console.error("Background render error:", err);
@@ -1043,12 +952,24 @@ async function renderVideoInBackground() {
 }
 
 /**
+ * Poll for render job completion with timeout
+ */
+async function pollRenderJobWithTimeout(jobId, timeoutMs) {
+  return Promise.race([
+    pollRenderJob(jobId),
+    new Promise((_, reject) => 
+      setTimeout(() => reject(new Error("Render timeout - video is taking too long to process")), timeoutMs)
+    )
+  ]);
+}
+
+/**
  * Poll for render job completion
  */
 async function pollRenderJob(jobId) {
   let pollCount = 0;
-  const maxPolls = 300; // 5 minutes max
-  let pollDelay = 2000; // Start with 2 seconds
+  const maxPolls = 300; // 5 minutes max with 1 second delays
+  let pollDelay = 1000; // Start with 1 second
 
   while (pollCount < maxPolls) {
     await new Promise(resolve => setTimeout(resolve, pollDelay));
@@ -1058,33 +979,61 @@ async function pollRenderJob(jobId) {
       
       // Handle rate limiting
       if (statusResponse.status === 429) {
-        pollDelay = Math.min(pollDelay * 2, 30000);
+        pollDelay = Math.min(pollDelay * 1.5, 10000);
         console.warn(`Rate limited. Next poll in ${pollDelay}ms`);
         pollCount++;
         continue;
       }
 
-      if (!statusResponse.ok) {
-        throw new Error(`Status check failed with status ${statusResponse.status}`);
+      // Handle job not found (hasn't been stored yet)
+      if (statusResponse.status === 404) {
+        console.warn(`Job ${jobId} not yet available, retrying...`);
+        // Increase poll delay gradually if job not found
+        pollDelay = Math.min(pollDelay + 200, 3000);
+        pollCount++;
+        continue;
       }
 
-      const statusData = await statusResponse.json();
+      if (!statusResponse.ok) {
+        console.warn(`Status check returned ${statusResponse.status}, retrying...`);
+        pollCount++;
+        continue;
+      }
+
+      let statusData;
+      try {
+        statusData = await statusResponse.json();
+      } catch (parseErr) {
+        console.error(`Failed to parse response: ${parseErr.message}`);
+        pollCount++;
+        continue;
+      }
       
+      if (!statusData) {
+        console.warn(`Empty status response, retrying...`);
+        pollCount++;
+        continue;
+      }
+
       if (!statusData.success) {
         throw new Error(statusData.error || "Render failed");
       }
 
       // Reset poll delay on successful response
-      if (pollDelay > 2000) {
-        pollDelay = 2000;
+      if (pollDelay > 1000) {
+        pollDelay = 1000;
       }
 
-      if (statusData.status === "completed") {
+      const status = statusData.status;
+      const errorMsg = statusData.error ? ` - ${statusData.error}` : '';
+      console.log(`Render job status: ${status} (${statusData.progress || 0}%)${errorMsg}`);
+
+      if (status === "completed") {
         console.log("Render completed successfully!");
         return jobId;
       }
 
-      if (statusData.status === "failed") {
+      if (status === "failed") {
         throw new Error(statusData.error || "Render job failed");
       }
 
@@ -1093,14 +1042,16 @@ async function pollRenderJob(jobId) {
 
     } catch (pollErr) {
       console.error(`Poll error: ${pollErr.message}`);
-      pollCount++;
-      if (pollCount >= maxPolls) {
-        throw new Error("Render timeout after 5 minutes");
+      // Re-throw errors that are not transient
+      if (pollErr.message.includes("Render") || pollErr.message.includes("failed")) {
+        throw pollErr;
       }
+      // For transient errors, continue retrying
+      pollCount++;
     }
   }
 
-  throw new Error("Render timeout after 5 minutes");
+  throw new Error("Render timeout after 5 minutes - video may be too large or your server is overloaded");
 }
 
 /**
@@ -1309,44 +1260,56 @@ async function shareToWhatsApp() {
     return;
   }
 
-  // Check if rendering is needed
+  // Check if rendering is needed (frame selected but not yet rendered)
   const needsRendering = state.selectedFrame !== "none" && !state.lastRenderedJobId;
 
-  // Determine which video URL to use
-  let videoUrl;
-  if (state.lastRenderedJobId && state.selectedFrame !== "none") {
-    videoUrl = state.lastRenderedUrl;
-  } else {
-    videoUrl = `${API_BASE}/video/preview/${state.videoId}`;
-  }
-
-  // Show loading modal
-  showShareLoadingModal(needsRendering);
-
   try {
+    let blob;
+    let videoUrl;
+
+    // If frame is selected and not yet rendered, render it first
+    if (needsRendering) {
+      showShareLoadingModal(true);
+      console.log(`Starting render with frameId: "${state.selectedFrame}"`);
+      
+      try {
+        // Render the video with the frame - this will block until complete
+        const jobId = await renderVideoInBackground();
+        if (jobId) {
+          state.lastRenderedJobId = jobId;
+          state.lastRenderedUrl = `${API_BASE}/video/download/${jobId}`;
+          videoUrl = state.lastRenderedUrl;
+          console.log("Render complete, fetching rendered video...");
+        } else {
+          throw new Error("Failed to start render job");
+        }
+      } catch (renderErr) {
+        closeShareLoadingModal();
+        showToast(renderErr.message || "Failed to render video", "error");
+        return;
+      }
+    } else {
+      // Use already rendered video or original video
+      showShareLoadingModal(false);
+      
+      if (state.lastRenderedJobId && state.selectedFrame !== "none") {
+        videoUrl = state.lastRenderedUrl;
+      } else {
+        videoUrl = `${API_BASE}/video/preview/${state.videoId}`;
+      }
+    }
+
     // Fetch the video as a blob
     const response = await fetch(videoUrl);
     if (!response.ok) {
       throw new Error(`Failed to fetch video: ${response.status}`);
     }
 
-    const blob = await response.blob();
+    blob = await response.blob();
     console.log(`Video blob fetched: ${blob.size} bytes`);
 
     if (blob.size === 0) {
-      throw new Error("Video blob is empty");
-    }
-
-    // Start background render if needed
-    if (needsRendering) {
-      renderVideoInBackground().then((renderedJobId) => {
-        if (renderedJobId) {
-          state.lastRenderedJobId = renderedJobId;
-          state.lastRenderedUrl = `${API_BASE}/video/download/${renderedJobId}`;
-        }
-      }).catch((err) => {
-        console.error("Background render failed:", err);
-      });
+      throw new Error("Video blob is empty - render may have failed");
     }
 
     closeShareLoadingModal();

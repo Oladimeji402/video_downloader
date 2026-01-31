@@ -6,6 +6,10 @@ import { fileURLToPath } from "url";
 import videoRoutes from "./routes/video.routes.js";
 import RateLimiter from "./services/rateLimiter.js";
 import FileCleanupService from "./services/fileCleanup.js";
+import logger from "./services/logger.js";
+import { initRedis, closeRedis } from "./services/redis.js";
+import downloader from "./services/downloader.js";
+import processor from "./services/processor.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -42,17 +46,27 @@ const fileCleanup = new FileCleanupService({
 // Start file cleanup service
 fileCleanup.start();
 
+// Initialize Redis and job queues
+await initRedis();
+downloader.initDownloadQueue();
+processor.initRenderQueue();
+
+logger.info("Application initialized");
+
 // Cleanup on shutdown
-process.on("SIGINT", () => {
-  console.log("\nShutting down...");
+process.on("SIGINT", async () => {
+  logger.info("Shutting down...");
   fileCleanup.stop();
+  await downloader.closeDownloadQueue();
+  await processor.closeRenderQueue();
+  await closeRedis();
   process.exit(0);
 });
 
 // Middleware
 app.use(cors());
 app.use(express.json());
-app.use(express.urlencoded({ limit: '500mb', extended: true }));
+app.use(express.urlencoded({ limit: "500mb", extended: true }));
 
 // Serve static files from frontend folder
 app.use(express.static(path.join(__dirname, "..", "frontend")));
@@ -80,7 +94,7 @@ app.use("/api/video", (req, res, next) => {
     
     return res.status(429).json({
       success: false,
-      error: `Rate limit reached. You can process ${rateLimiter.maxRequests} videos per hour. Try again in ${minutesUntilReset} minute${minutesUntilReset === 1 ? '' : 's'}.`,
+      error: `Rate limit reached. You can process ${rateLimiter.maxRequests} videos per hour. Try again in ${minutesUntilReset} minute${minutesUntilReset === 1 ? "" : "s"}.`,
       retryAfter: resetTime,
       retryAfterSeconds: resetTime,
       remaining: remaining,
@@ -109,7 +123,7 @@ app.get("/", (req, res) => {
 });
 
 // Error handling middleware
-app.use((err, req, res, next) => {
+app.use((err, req, res, _next) => {
   console.error("Server error:", err);
   res.status(500).json({
     success: false,
@@ -126,7 +140,7 @@ app.use((req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`
+  logger.info(`
 ╔══════════════════════════════════════════════════════════╗
 ║                   VIDEO FRAMER SERVER                     ║
 ╠══════════════════════════════════════════════════════════╣
