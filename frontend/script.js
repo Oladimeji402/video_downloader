@@ -278,7 +278,7 @@ function renderFrameOptions() {
     option.dataset.frame = frame.id;
     option.innerHTML = `
       <div class="frame-thumb">
-        <img src="${window.location.origin}${frame.path}" alt="${frame.name}" />
+        <img src="${API_BASE}${frame.path}" alt="${frame.name}" />
       </div>
       <span>${frame.name}</span>
     `;
