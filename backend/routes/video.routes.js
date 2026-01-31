@@ -50,7 +50,7 @@ const FRAMES_DIR = path.join(__dirname, "..", "frames");
  * POST /api/video/resolve
  * Start downloading video from social media URL
  */
-router.post("/resolve", (req, res) => {
+router.post("/resolve", async (req, res) => {
   const { url } = req.body;
 
   if (!url) {
@@ -82,7 +82,7 @@ router.post("/resolve", (req, res) => {
   }
 
   try {
-    const result = downloader.startDownload(url);
+    const result = await downloader.startDownload(url);
     
     res.json({
       success: true,
@@ -322,7 +322,7 @@ router.get("/frames/:filename", (req, res) => {
  * POST /api/video/render
  * Start rendering video with frame overlay
  */
-router.post("/render", (req, res) => {
+router.post("/render", async (req, res) => {
   const { videoId, frameId } = req.body;
 
   if (!videoId || !frameId) {
@@ -341,7 +341,7 @@ router.post("/render", (req, res) => {
     });
   }
 
-  const result = processor.startRender(videoPath, frameId);
+  const result = await processor.startRender(videoPath, frameId);
 
   if (result.error) {
     return res.status(400).json({
