@@ -1343,7 +1343,7 @@ async function shareToWhatsApp() {
         `Check out my framed video! ${shareableUrl}`
       );
       window.open(`https://wa.me/?text=${message}`, "_blank");
-      showToast("Opening WhatsApp...", "success");
+      showToast("click the WhatsApp again to share", "success");
     } catch (err) {
       throw new Error("Failed to open WhatsApp");
     }
