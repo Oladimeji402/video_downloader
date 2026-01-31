@@ -280,7 +280,7 @@ export function getAvailableFrames() {
         id,
         name: formatFrameName(id),
         filename: file,
-        path: `/api/frames/${file}`,
+        path: `/frames/${file}`,
       });
     }
   }
