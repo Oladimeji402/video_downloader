@@ -6,8 +6,9 @@
 // ===========================================
 // Configuration
 // ===========================================
-// Auto-detect API base URL (works for localhost and production)
-const API_BASE = window.location.origin + "/api";
+// API base URL - will be replaced during deployment
+// For local: uses same origin. For production: set via window.ENV or use Railway URL
+const API_BASE = window.ENV?.API_URL || "http://localhost:4000/api";
 const POLL_INTERVAL = 1000; // 1 second
 
 // ===========================================
@@ -277,7 +278,7 @@ function renderFrameOptions() {
     option.dataset.frame = frame.id;
     option.innerHTML = `
       <div class="frame-thumb">
-        <img src="${window.location.origin}${frame.path}" alt="${frame.name}" />
+        <img src="${API_BASE}${frame.path}" alt="${frame.name}" />
       </div>
       <span>${frame.name}</span>
     `;
@@ -355,8 +356,8 @@ function updateFramePreview(frameId) {
     const frame = state.frames.find((f) => f.id === frameId);
     if (frame) {
       console.log("Image frame found:", frame);
-      // Encode the URL to handle spaces and special characters
-      const imageUrl = `${window.location.origin}${encodeURI(frame.path)}`;
+      // Use API_BASE to load from Railway backend
+      const imageUrl = `${API_BASE}${encodeURI(frame.path)}`;
       console.log("Loading frame image from:", imageUrl);
       
       // Set background image
@@ -686,12 +687,10 @@ function showVideoPreview() {
     elements.previewSection.scrollIntoView({ behavior: "smooth", block: "start" });
   }, 100);
   
-  // Auto-start rendering if a frame is already selected (from pre-selection)
-  // This ensures framed video is ready by the time user clicks Share
+  // Update frame preview if a frame is pre-selected
   if (state.selectedFrame && state.selectedFrame !== "none") {
-    console.log("Video loaded with frame pre-selected, starting auto-render:", state.selectedFrame);
+    console.log("Video loaded with frame pre-selected:", state.selectedFrame);
     updateFramePreview(state.selectedFrame);
-    autoStartRenderForFrame(state.selectedFrame);
   }
 }
 
@@ -1344,7 +1343,7 @@ async function shareToWhatsApp() {
         `Check out my framed video! ${shareableUrl}`
       );
       window.open(`https://wa.me/?text=${message}`, "_blank");
-      showToast("Opening WhatsApp...", "success");
+      showToast("click the WhatsApp again to share", "success");
     } catch (err) {
       throw new Error("Failed to open WhatsApp");
     }

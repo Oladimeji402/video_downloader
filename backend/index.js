@@ -68,9 +68,6 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ limit: "500mb", extended: true }));
 
-// Serve static files from frontend folder
-app.use(express.static(path.join(__dirname, "..", "frontend")));
-
 // Rate limiting middleware for video endpoints
 // ONLY rate limit expensive operations (downloads/renders), NOT status polling or streaming
 app.use("/api/video", (req, res, next) => {
@@ -117,9 +114,20 @@ app.get("/api/health", (req, res) => {
   });
 });
 
-// Root route
+// Root route - API info
 app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "..", "frontend", "index.html"));
+  res.json({ 
+    message: "Video Framer API",
+    status: "running",
+    endpoints: [
+      "POST /api/video/resolve",
+      "POST /api/video/upload",
+      "GET /api/video/status/:id",
+      "GET /api/frames",
+      "POST /api/video/render",
+      "GET /api/health"
+    ]
+  });
 });
 
 // Error handling middleware

@@ -1,0 +1,5 @@
+{
+  "buildCommand": "echo 'Frontend is static'",
+  "outputDirectory": "frontend"
+}
+
