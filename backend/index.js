@@ -66,7 +66,7 @@ process.on("SIGINT", async () => {
 // Middleware
 app.use(cors());
 app.use(express.json());
-app.use(express.urlencoded({ limit: '500mb', extended: true }));
+app.use(express.urlencoded({ limit: "500mb", extended: true }));
 
 // Serve static files from frontend folder
 app.use(express.static(path.join(__dirname, "..", "frontend")));
@@ -94,7 +94,7 @@ app.use("/api/video", (req, res, next) => {
     
     return res.status(429).json({
       success: false,
-      error: `Rate limit reached. You can process ${rateLimiter.maxRequests} videos per hour. Try again in ${minutesUntilReset} minute${minutesUntilReset === 1 ? '' : 's'}.`,
+      error: `Rate limit reached. You can process ${rateLimiter.maxRequests} videos per hour. Try again in ${minutesUntilReset} minute${minutesUntilReset === 1 ? "" : "s"}.`,
       retryAfter: resetTime,
       retryAfterSeconds: resetTime,
       remaining: remaining,
@@ -123,7 +123,7 @@ app.get("/", (req, res) => {
 });
 
 // Error handling middleware
-app.use((err, req, res, next) => {
+app.use((err, req, res, _next) => {
   console.error("Server error:", err);
   res.status(500).json({
     success: false,

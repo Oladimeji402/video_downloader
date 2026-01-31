@@ -1,16 +1,16 @@
-import ytdl from 'ytdl-core';
-import Queue from 'bull';
-import path from 'path';
-import fs from 'fs';
-import { v4 as uuidv4 } from 'uuid';
-import { fileURLToPath } from 'url';
-import logger from './logger.js';
-import { isRedisConnected } from './redis.js';
+import ytdl from "ytdl-core";
+import Queue from "bull";
+import path from "path";
+import fs from "fs";
+import { v4 as uuidv4 } from "uuid";
+import { fileURLToPath } from "url";
+import logger from "./logger.js";
+import { isRedisConnected } from "./redis.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const DOWNLOADS_DIR = path.join(__dirname, '..', 'temp', 'downloads');
+const DOWNLOADS_DIR = path.join(__dirname, "..", "temp", "downloads");
 
 // Ensure downloads directory exists
 if (!fs.existsSync(DOWNLOADS_DIR)) {
@@ -31,18 +31,18 @@ async function processDownload(videoId, url) {
   const jobData = downloadJobs.get(videoId);
 
   try {
-    logger.info({ videoId, url }, 'Starting video download');
+    logger.info({ videoId, url }, "Starting video download");
 
     // Check if ytdl-core supports this URL (YouTube only)
     if (ytdl.validateURL(url)) {
       const videoInfo = await ytdl.getInfo(url);
       const format = ytdl.chooseFormat(videoInfo.formats, {
-        quality: 'highest',
-        filter: (format) => format.container === 'mp4',
+        quality: "highest",
+        filter: (format) => format.container === "mp4",
       });
 
       if (!format) {
-        throw new Error('No suitable video format found');
+        throw new Error("No suitable video format found");
       }
 
       const stream = ytdl(url, { format });
@@ -51,7 +51,7 @@ async function processDownload(videoId, url) {
       let downloadedBytes = 0;
       const totalBytes = parseInt(format.contentLength, 10) || 0;
 
-      stream.on('data', (chunk) => {
+      stream.on("data", (chunk) => {
         downloadedBytes += chunk.length;
         if (totalBytes > 0 && jobData) {
           jobData.progress = Math.round((downloadedBytes / totalBytes) * 100);
@@ -60,27 +60,27 @@ async function processDownload(videoId, url) {
 
       await new Promise((resolve, reject) => {
         stream.pipe(writeStream);
-        writeStream.on('finish', resolve);
-        writeStream.on('error', reject);
-        stream.on('error', reject);
+        writeStream.on("finish", resolve);
+        writeStream.on("error", reject);
+        stream.on("error", reject);
       });
     } else {
       // Fallback to yt-dlp for non-YouTube URLs (TikTok, Instagram, etc.)
-      const { spawn } = await import('child_process');
+      const { spawn } = await import("child_process");
       
       await new Promise((resolve, reject) => {
-        const ytdlp = spawn('yt-dlp', [
-          '-f', 'mp4/best[ext=mp4]/best',
-          '--merge-output-format', 'mp4',
-          '-o', outputPath,
-          '--newline',
-          '--progress',
+        const ytdlp = spawn("yt-dlp", [
+          "-f", "mp4/best[ext=mp4]/best",
+          "--merge-output-format", "mp4",
+          "-o", outputPath,
+          "--newline",
+          "--progress",
           url
         ]);
 
-        let stderr = '';
+        let stderr = "";
 
-        ytdlp.stdout.on('data', (data) => {
+        ytdlp.stdout.on("data", (data) => {
           const output = data.toString();
           const progressMatch = output.match(/(\d+\.?\d*)%/);
           if (progressMatch && jobData) {
@@ -88,11 +88,11 @@ async function processDownload(videoId, url) {
           }
         });
 
-        ytdlp.stderr.on('data', (data) => {
+        ytdlp.stderr.on("data", (data) => {
           stderr += data.toString();
         });
 
-        ytdlp.on('close', (code) => {
+        ytdlp.on("close", (code) => {
           if (code === 0 && fs.existsSync(outputPath)) {
             resolve();
           } else {
@@ -100,23 +100,23 @@ async function processDownload(videoId, url) {
           }
         });
 
-        ytdlp.on('error', reject);
+        ytdlp.on("error", reject);
       });
     }
 
-    logger.info({ videoId }, 'Download completed');
+    logger.info({ videoId }, "Download completed");
 
     if (jobData) {
-      jobData.status = 'completed';
+      jobData.status = "completed";
       jobData.progress = 100;
     }
 
-    return { videoId, status: 'completed', outputPath };
+    return { videoId, status: "completed", outputPath };
   } catch (err) {
-    logger.error({ videoId, error: err.message }, 'Download failed');
+    logger.error({ videoId, error: err.message }, "Download failed");
 
     if (jobData) {
-      jobData.status = 'failed';
+      jobData.status = "failed";
       jobData.error = err.message;
     }
 
@@ -130,18 +130,18 @@ async function processDownload(videoId, url) {
  */
 export function initDownloadQueue() {
   if (!isRedisConnected()) {
-    logger.info('Running without Redis - using direct processing for downloads');
+    logger.info("Running without Redis - using direct processing for downloads");
     return null;
   }
 
   try {
-    const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
+    const redisUrl = process.env.REDIS_URL || "redis://localhost:6379";
     
-    downloadQueue = new Queue('video-downloads', redisUrl, {
+    downloadQueue = new Queue("video-downloads", redisUrl, {
       defaultJobOptions: {
         attempts: 3,
         backoff: {
-          type: 'exponential',
+          type: "exponential",
           delay: 2000,
         },
         removeOnComplete: true,
@@ -153,18 +153,18 @@ export function initDownloadQueue() {
       return processDownload(videoId, url);
     });
 
-    downloadQueue.on('completed', (job) => {
-      logger.info({ jobId: job.id }, 'Download job completed');
+    downloadQueue.on("completed", (job) => {
+      logger.info({ jobId: job.id }, "Download job completed");
     });
 
-    downloadQueue.on('failed', (job, err) => {
-      logger.error({ jobId: job.id, error: err.message }, 'Download job failed');
+    downloadQueue.on("failed", (job, err) => {
+      logger.error({ jobId: job.id, error: err.message }, "Download job failed");
     });
 
-    logger.info('Download queue initialized');
+    logger.info("Download queue initialized");
     return downloadQueue;
   } catch (err) {
-    logger.warn({ error: err.message }, 'Failed to initialize download queue');
+    logger.warn({ error: err.message }, "Failed to initialize download queue");
     return null;
   }
 }
@@ -180,7 +180,7 @@ export async function startDownload(url) {
   const jobData = {
     videoId,
     url,
-    status: 'downloading',
+    status: "downloading",
     progress: 0,
     outputPath: path.join(DOWNLOADS_DIR, `${videoId}.mp4`),
     error: null,
@@ -194,21 +194,21 @@ export async function startDownload(url) {
     if (downloadQueue) {
       // Add to Bull queue (when Redis is available)
       await downloadQueue.add({ videoId, url });
-      logger.info({ videoId, url }, 'Download job queued');
+      logger.info({ videoId, url }, "Download job queued");
     } else {
       // Direct processing (no Redis)
-      logger.info({ videoId }, 'Processing download directly (no queue)');
+      logger.info({ videoId }, "Processing download directly (no queue)");
       processDownload(videoId, url).catch(err => {
-        logger.error({ videoId, error: err.message }, 'Direct download failed');
+        logger.error({ videoId, error: err.message }, "Direct download failed");
       });
     }
   } catch (err) {
-    logger.error({ videoId, error: err.message }, 'Failed to start download');
-    jobData.status = 'failed';
+    logger.error({ videoId, error: err.message }, "Failed to start download");
+    jobData.status = "failed";
     jobData.error = err.message;
   }
 
-  return { videoId, status: 'downloading' };
+  return { videoId, status: "downloading" };
 }
 
 /**

@@ -1218,44 +1218,48 @@ async function shareToWhatsApp() {
     return;
   }
 
-  // Check if rendering is needed
+  // Check if rendering is needed (frame selected but not yet rendered)
   const needsRendering = state.selectedFrame !== "none" && !state.lastRenderedJobId;
 
-  // Determine which video URL to use
-  let videoUrl;
-  if (state.lastRenderedJobId && state.selectedFrame !== "none") {
-    videoUrl = state.lastRenderedUrl;
-  } else {
-    videoUrl = `${API_BASE}/video/preview/${state.videoId}`;
-  }
-
-  // Show loading modal
-  showShareLoadingModal(needsRendering);
-
   try {
+    let blob;
+    let videoUrl;
+
+    // If frame is selected and not yet rendered, render it first
+    if (needsRendering) {
+      showShareLoadingModal(true);
+      
+      // Render the video with the frame
+      const jobId = await renderVideoInBackground();
+      if (jobId) {
+        state.lastRenderedJobId = jobId;
+        state.lastRenderedUrl = `${API_BASE}/video/download/${jobId}`;
+        videoUrl = state.lastRenderedUrl;
+      } else {
+        throw new Error("Failed to render video");
+      }
+    } else {
+      // Use already rendered video or original video
+      showShareLoadingModal(false);
+      
+      if (state.lastRenderedJobId && state.selectedFrame !== "none") {
+        videoUrl = state.lastRenderedUrl;
+      } else {
+        videoUrl = `${API_BASE}/video/preview/${state.videoId}`;
+      }
+    }
+
     // Fetch the video as a blob
     const response = await fetch(videoUrl);
     if (!response.ok) {
       throw new Error(`Failed to fetch video: ${response.status}`);
     }
 
-    const blob = await response.blob();
+    blob = await response.blob();
     console.log(`Video blob fetched: ${blob.size} bytes`);
 
     if (blob.size === 0) {
       throw new Error("Video blob is empty");
-    }
-
-    // Start background render if needed
-    if (needsRendering) {
-      renderVideoInBackground().then((renderedJobId) => {
-        if (renderedJobId) {
-          state.lastRenderedJobId = renderedJobId;
-          state.lastRenderedUrl = `${API_BASE}/video/download/${renderedJobId}`;
-        }
-      }).catch((err) => {
-        console.error("Background render failed:", err);
-      });
     }
 
     closeShareLoadingModal();

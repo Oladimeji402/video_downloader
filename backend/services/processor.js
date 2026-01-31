@@ -15,7 +15,7 @@ try {
     ffmpeg.setFfmpegPath(ffmpegStatic.default);
     logger.info("Using ffmpeg-static");
   }
-} catch (err) {
+} catch {
   logger.info("Using system FFmpeg");
 }
 
@@ -93,8 +93,8 @@ async function processRender(jobId, videoPath, frameId) {
         .complexFilter([
           // Scale video down for faster processing + smaller file
           `[0:v]scale=${width}:${height}:flags=fast_bilinear[scaled]`,
-          `[1:v]format=rgba[frame]`,
-          `[scaled][frame]overlay=0:0[out]`,
+          "[1:v]format=rgba[frame]",
+          "[scaled][frame]overlay=0:0[out]",
         ])
         .outputOptions([
           "-map", "[out]",
@@ -156,12 +156,12 @@ async function processRender(jobId, videoPath, frameId) {
  */
 export function initRenderQueue() {
   if (!isRedisConnected()) {
-    logger.info('Running without Redis - using direct processing for renders');
+    logger.info("Running without Redis - using direct processing for renders");
     return null;
   }
 
   try {
-    const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
+    const redisUrl = process.env.REDIS_URL || "redis://localhost:6379";
     
     renderQueue = new Queue("video-renders", redisUrl, {
       defaultJobOptions: {
