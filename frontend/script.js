@@ -6,8 +6,8 @@
 // ===========================================
 // Configuration
 // ===========================================
-// Auto-detect API base URL (works for localhost and production)
-const API_BASE = window.location.origin + "/api";
+// API base URL - use environment variable or fallback to relative path
+const API_BASE = process.env.REACT_APP_API_URL || window.location.origin + "/api";
 const POLL_INTERVAL = 1000; // 1 second
 
 // ===========================================
