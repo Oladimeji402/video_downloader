@@ -356,8 +356,8 @@ function updateFramePreview(frameId) {
     const frame = state.frames.find((f) => f.id === frameId);
     if (frame) {
       console.log("Image frame found:", frame);
-      // Encode the URL to handle spaces and special characters
-      const imageUrl = `${window.location.origin}${encodeURI(frame.path)}`;
+      // Use API_BASE to load from Railway backend
+      const imageUrl = `${API_BASE}${encodeURI(frame.path)}`;
       console.log("Loading frame image from:", imageUrl);
       
       // Set background image
