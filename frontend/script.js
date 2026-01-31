@@ -866,35 +866,6 @@ async function shareVideo() {
   }
 }
 
-    // Close modal before sharing (share sheet will appear)
-    closeShareLoadingModal();
-
-    // Share IMMEDIATELY - don't wait for anything
-    await shareBlob(blob);
-    
-    // If frame selected but not rendered, start render in background for NEXT share
-    if (state.selectedFrame !== "none" && !state.lastRenderedJobId && !state.isAutoRenderInProgress) {
-      console.log("Starting background render for next share...");
-      renderVideoInBackground().then((renderedJobId) => {
-        if (renderedJobId) {
-          console.log("Background render completed, ready for next share:", renderedJobId);
-          state.lastRenderedJobId = renderedJobId;
-          state.lastRenderedUrl = `${API_BASE}/video/download/${renderedJobId}`;
-          showToast("Framed version ready for next share!", "success");
-        }
-      }).catch((err) => {
-        console.error("Background render failed:", err);
-        // Don't show error - user already shared successfully
-      });
-    }
-
-  } catch (err) {
-    console.error("Share error:", err);
-    closeShareLoadingModal();
-    showToast(err.message || "Unable to share video", "error");
-  }
-}
-
 /**
  * Share a Blob using native Web Share API
  * Must be called within a user gesture context
