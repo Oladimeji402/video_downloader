@@ -83,9 +83,9 @@ async function processRender(jobId, videoPath, frameId) {
     
     logger.info({ jobId, width, height, duration }, "Video dimensions determined");
 
-    // Optimize resolution for WhatsApp (max 720p for fast sharing)
-    // WhatsApp re-compresses anyway, so smaller = faster upload
-    const maxDimension = 720;
+    // Optimize resolution for WhatsApp Status (max 1080p for better quality)
+    // Keep higher quality since WhatsApp Status supports up to 1080p
+    const maxDimension = 1080;
     if (width > maxDimension || height > maxDimension) {
       const scale = maxDimension / Math.max(width, height);
       width = Math.round(width * scale / 2) * 2; // Ensure even dimensions
@@ -123,8 +123,8 @@ async function processRender(jobId, videoPath, frameId) {
 
         ffmpegCmd
           .complexFilter([
-            // Scale video down for faster processing + smaller file
-            `[0:v]scale=${width}:${height}:flags=fast_bilinear[scaled]`,
+            // Scale video to target resolution with good quality
+            `[0:v]scale=${width}:${height}:flags=lanczos[scaled]`,
             "[1:v]format=rgba[frame]",
             "[scaled][frame]overlay=0:0[out]",
           ])
@@ -132,19 +132,19 @@ async function processRender(jobId, videoPath, frameId) {
             "-map", "[out]",
             "-map", "0:a?",
             "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-crf", "30",
-            "-profile:v", "baseline",
-            "-level", "3.0",
+            "-preset", "fast",
+            "-crf", "23",
+            "-profile:v", "high",
+            "-level", "4.0",
             "-pix_fmt", "yuv420p",
             "-c:a", "aac",
-            "-b:a", "64k",
+            "-b:a", "128k",
             "-ar", "44100",
-            "-ac", "1",
+            "-ac", "2",
             "-movflags", "+faststart",
             "-threads", "0",
-            "-maxrate", "2M",
-            "-bufsize", "4M",
+            "-maxrate", "5M",
+            "-bufsize", "10M",
           ])
           .output(outputPath)
           .on("start", (cmd) => {
