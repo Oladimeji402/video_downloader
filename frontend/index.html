@@ -43,13 +43,14 @@
           </svg>
           <span>URL</span>
         </button>
-        <button id="uploadTab" class="tab-button" data-tab="upload-tab" role="tab" aria-selected="false" aria-controls="upload-tab">
+        <button id="uploadTab" class="tab-button" data-tab="upload-tab" role="tab" aria-selected="false" aria-controls="upload-tab" disabled>
           <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
             <polyline points="17 8 12 3 7 8"></polyline>
             <line x1="12" y1="3" x2="12" y2="15"></line>
           </svg>
           <span>Upload</span>
+          <span class="badge-maintenance">Maintenance</span>
         </button>
       </div>
 
@@ -76,7 +77,10 @@
 
       <!-- Upload Tab Content -->
       <div id="upload-tab" class="tab-content">
-        <div class="upload-area" id="uploadArea">
+        <div class="maintenance-banner" style="background: #fff3cd; border: 1px solid #ffc107; border-radius: 8px; padding: 16px; margin-bottom: 16px; text-align: center;">
+          <p style="margin: 0; color: #856404; font-weight: 500;">🔧 Upload feature is currently under maintenance</p>
+        </div>
+        <div class="upload-area" id="uploadArea" style="opacity: 0.5; pointer-events: none;">
           <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
             <polyline points="17 8 12 3 7 8"></polyline>

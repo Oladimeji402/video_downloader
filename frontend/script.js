@@ -1565,10 +1565,11 @@ function handleFileUpload(file) {
 elements.urlTab.addEventListener("click", () => switchTab("url-tab"));
 elements.uploadTab.addEventListener("click", () => switchTab("upload-tab"));
 
-// File upload - Browse button
+// File upload - Browse button (DISABLED - maintenance)
 elements.uploadFileBtn.addEventListener("click", (e) => {
   e.preventDefault();
-  elements.fileInput.click();
+  showToast("Upload feature is currently under maintenance", "warning");
+  // elements.fileInput.click();
 });
 
 // File upload - File input change
@@ -1581,28 +1582,30 @@ elements.fileInput.addEventListener("change", (e) => {
   }
 });
 
-// Drag and drop
+// Drag and drop (DISABLED - maintenance)
 elements.uploadArea.addEventListener("dragover", (e) => {
   e.preventDefault();
   e.stopPropagation();
-  elements.uploadArea.classList.add("drag-over");
+  // elements.uploadArea.classList.add("drag-over");
+  showToast("Upload feature is currently under maintenance", "warning");
 });
 
 elements.uploadArea.addEventListener("dragleave", (e) => {
   e.preventDefault();
   e.stopPropagation();
-  elements.uploadArea.classList.remove("drag-over");
+  // elements.uploadArea.classList.remove("drag-over");
 });
 
 elements.uploadArea.addEventListener("drop", (e) => {
   e.preventDefault();
   e.stopPropagation();
-  elements.uploadArea.classList.remove("drag-over");
+  // elements.uploadArea.classList.remove("drag-over");
 
-  const files = e.dataTransfer.files;
-  if (files.length > 0) {
-    handleFileUpload(files[0]);
-  }
+  // const files = e.dataTransfer.files;
+  // if (files.length > 0) {
+  //   handleFileUpload(files[0]);
+  // }
+  showToast("Upload feature is currently under maintenance", "warning");
 });
 
 // Click upload area to open file picker (only if not clicking the button)
