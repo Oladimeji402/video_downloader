@@ -635,9 +635,17 @@ function showVideoPreview() {
   // Append source to video element
   elements.videoPlayer.appendChild(sourceEl);
   
-  // Set load behavior
+  // Set mobile-friendly attributes
+  elements.videoPlayer.setAttribute('playsinline', 'true');
+  elements.videoPlayer.setAttribute('webkit-playsinline', 'true');
   elements.videoPlayer.preload = "metadata";
   elements.videoPlayer.load();
+  
+  // Add loadeddata event for successful preview
+  elements.videoPlayer.addEventListener('loadeddata', function onLoaded() {
+    console.log('Video preview loaded successfully');
+    elements.videoPlayer.removeEventListener('loadeddata', onLoaded);
+  }, { once: true });
   
   console.log("Video player HTML:", elements.videoPlayer.outerHTML);
   
@@ -1558,6 +1566,8 @@ elements.fileInput.addEventListener("change", (e) => {
   const file = e.target.files[0];
   if (file) {
     handleFileUpload(file);
+    // Reset input to allow re-selection of same file
+    e.target.value = '';
   }
 });
 
@@ -1585,9 +1595,18 @@ elements.uploadArea.addEventListener("drop", (e) => {
   }
 });
 
-// Click upload area to open file picker
+// Click upload area to open file picker (only if not clicking the button)
 elements.uploadArea.addEventListener("click", (e) => {
-  if (e.target === elements.uploadArea || e.target.closest(".upload-area")) {
+  // Don't trigger if clicking the browse button itself
+  if (e.target.id === "uploadFileBtn" || e.target.closest("#uploadFileBtn")) {
+    return;
+  }
+  // Only trigger on upload area background/text areas
+  if (e.target === elements.uploadArea || 
+      e.target.classList.contains('upload-text') ||
+      e.target.classList.contains('upload-subtext') ||
+      e.target.classList.contains('upload-hint') ||
+      e.target.classList.contains('upload-icon')) {
     elements.fileInput.click();
   }
 });
