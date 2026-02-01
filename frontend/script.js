@@ -1432,6 +1432,16 @@ function switchTab(tabName) {
   if (selectedBtn) {
     selectedBtn.classList.add("tab-active");
   }
+
+  // Update preview button text based on active tab
+  const previewBtnText = elements.previewBtn.querySelector('span');
+  if (previewBtnText) {
+    if (tabName === 'upload-tab') {
+      previewBtnText.textContent = 'Upload & Preview';
+    } else {
+      previewBtnText.textContent = 'Fetch & Preview';
+    }
+  }
 }
 
 /**
