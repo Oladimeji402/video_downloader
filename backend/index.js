@@ -63,8 +63,25 @@ process.on("SIGINT", async () => {
   process.exit(0);
 });
 
+// CORS configuration - allow frontend origins
+const corsOptions = {
+  origin: [
+    "https://videoframer.vercel.app",
+    "http://localhost:3000",
+    "http://localhost:4000",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:4000",
+  ],
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "Accept"],
+  credentials: true,
+  optionsSuccessStatus: 200, // For legacy browser compatibility
+};
+
 // Middleware
-app.use(cors());
+app.use(cors(corsOptions));
+// Handle preflight OPTIONS requests explicitly for all routes
+app.options("*", cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ limit: "500mb", extended: true }));
 
