@@ -239,6 +239,24 @@ input[type="text"]:focus {
   bottom: -1px;
 }
 
+.tab-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.tab-button .badge-maintenance {
+  display: inline-block;
+  background: #ffc107;
+  color: #856404;
+  font-size: 0.65rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 12px;
+  margin-left: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
 .tab-button:hover {
   color: var(--text-primary);
   border-bottom-color: var(--border-color);
