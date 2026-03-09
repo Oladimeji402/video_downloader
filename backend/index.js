@@ -80,8 +80,6 @@ const corsOptions = {
 
 // Middleware
 app.use(cors(corsOptions));
-// Handle preflight OPTIONS requests explicitly for all routes
-app.options("*", cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ limit: "500mb", extended: true }));
 
