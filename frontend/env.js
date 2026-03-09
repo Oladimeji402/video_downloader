@@ -1,4 +1,4 @@
-// Environment configuration - will be set during build
+// Environment configuration - production API on Render
 window.ENV = {
-  API_URL: "https://videoframer-production.up.railway.app/api"
+  API_URL: "https://videoframer.onrender.com/api"
 };
