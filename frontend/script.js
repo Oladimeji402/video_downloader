@@ -1,40 +1,26 @@
 /**
- * VideoFramer Frontend
+ * FrameIt Frontend
  * Handles video URL resolution, preview, frame selection, and download
  */
 
 // ===========================================
 // Configuration
 // ===========================================
-// API base URL - will be replaced during deployment
-// For local: uses same origin. For production: set via window.ENV or use Railway URL
 const API_BASE = window.ENV?.API_URL || "http://localhost:4000/api";
-const POLL_INTERVAL = 1000; // 1 second
+const POLL_INTERVAL = 800;
 
 // ===========================================
 // DOM Elements
 // ===========================================
 const elements = {
-  // Tab navigation
-  urlTab: document.getElementById("urlTab"),
-  uploadTab: document.getElementById("uploadTab"),
-  
-  // Input section
   videoUrl: document.getElementById("videoUrl"),
   actionBtn: document.getElementById("actionBtn"),
   previewBtn: document.getElementById("previewBtn"),
-  
-  // File upload
-  uploadArea: document.getElementById("uploadArea"),
-  uploadFileBtn: document.getElementById("uploadFileBtn"),
-  fileInput: document.getElementById("fileInput"),
-  
-  // Fetch status
+
   fetchStatus: document.getElementById("fetchStatus"),
   fetchStatusText: document.getElementById("fetchStatusText"),
   fetchProgress: document.getElementById("fetchProgress"),
 
-  // Preview section
   previewSection: document.getElementById("previewSection"),
   framePreview: document.getElementById("framePreview"),
   videoPlayer: document.getElementById("videoPlayer"),
@@ -42,20 +28,20 @@ const elements = {
   frameOptions: document.getElementById("frameOptions"),
   noFramesMsg: document.getElementById("noFramesMsg"),
 
-  // Download section
   downloadSection: document.getElementById("downloadSection"),
   downloadBtn: document.getElementById("downloadBtn"),
   renderStatus: document.getElementById("renderStatus"),
   renderStatusText: document.getElementById("renderStatusText"),
   renderProgress: document.getElementById("renderProgress"),
 
-  // Share buttons
   shareBtn: document.getElementById("shareBtn"),
   whatsappBtn: document.getElementById("whatsappBtn"),
   copyLinkBtn: document.getElementById("copyLinkBtn"),
 
-  // Toast container
   toastContainer: document.getElementById("toastContainer"),
+
+  serverBanner: document.getElementById("serverBanner"),
+  serverBannerText: document.getElementById("serverBannerText"),
 };
 
 // ===========================================
@@ -68,117 +54,132 @@ let state = {
   isProcessing: false,
   lastRenderedJobId: null,
   lastRenderedUrl: null,
-  renderedVideoBlob: null, // Cache rendered video blob
+  renderedVideoBlob: null,
+  serverReady: false,
+  bgRenderPromise: null, // background pre-render promise
 };
 
-// Frame image preload cache
 const frameImageCache = new Map();
 
 // ===========================================
-// URL Validation Helper
+// Valid URL Domains
 // ===========================================
 const VALID_DOMAINS = [
-  "tiktok.com",
-  "instagram.com",
-  "youtube.com",
-  "youtu.be",
-  "twitter.com",
-  "x.com",
-  "facebook.com",
-  "fb.watch"
+  "tiktok.com", "instagram.com", "youtube.com", "youtu.be",
+  "twitter.com", "x.com", "facebook.com", "fb.watch"
 ];
 
 function isValidSocialUrl(url) {
-  if (!url || typeof url !== 'string') return false;
-  return VALID_DOMAINS.some(domain => url.includes(domain));
+  if (!url || typeof url !== "string") return false;
+  return VALID_DOMAINS.some(d => url.includes(d));
+}
+
+// ===========================================
+// Server Wake-up
+// ===========================================
+async function wakeServer() {
+  const banner = elements.serverBanner;
+  const text = elements.serverBannerText;
+
+  banner.classList.add("visible");
+  text.textContent = "Waking up server...";
+
+  const start = Date.now();
+  let attempts = 0;
+  const maxAttempts = 20; // ~60s total for cold starts
+
+  while (attempts < maxAttempts) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
+      const res = await fetch(`${API_BASE}/health`, { signal: controller.signal });
+      clearTimeout(timeout);
+
+      if (res.ok) {
+        state.serverReady = true;
+        const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+        text.textContent = `Server ready (${elapsed}s)`;
+        banner.classList.add("ready");
+
+        setTimeout(() => {
+          banner.classList.remove("visible", "ready");
+        }, 2000);
+        return;
+      }
+    } catch (_) {
+      // Server still waking up
+    }
+
+    attempts++;
+    const waitMsg = attempts > 3
+      ? "Server is cold-starting, hang tight..."
+      : "Connecting to server...";
+    text.textContent = waitMsg;
+    await new Promise(r => setTimeout(r, 3000));
+  }
+
+  text.textContent = "Server unavailable â€” try refreshing";
+  setTimeout(() => banner.classList.remove("visible"), 6000);
 }
 
 // ===========================================
 // Utility Functions
 // ===========================================
-
-/**
- * Show toast notification
- */
 function showToast(message, type = "info") {
   const toast = document.createElement("div");
   toast.className = `toast ${type}`;
   toast.textContent = message;
   elements.toastContainer.appendChild(toast);
-
   setTimeout(() => {
     toast.style.opacity = "0";
-    toast.style.transform = "translateY(20px)";
-    setTimeout(() => toast.remove(), 300);
-  }, 3500);
+    toast.style.transform = "translateY(12px)";
+    setTimeout(() => toast.remove(), 250);
+  }, 3000);
 }
 
-/**
- * Update button state based on input
- */
 function updateActionButton() {
   const hasValue = elements.videoUrl.value.trim().length > 0;
   const btn = elements.actionBtn;
-  
   if (hasValue) {
-    btn.innerHTML = `
-      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <line x1="18" y1="6" x2="6" y2="18"></line>
-        <line x1="6" y1="6" x2="18" y2="18"></line>
-      </svg>
-    `;
+    btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`;
     btn.title = "Clear";
   } else {
-    btn.innerHTML = `
-      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-      </svg>
-    `;
+    btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
     btn.title = "Paste from clipboard";
   }
 }
 
-/**
- * Set loading state for a button
- */
-function setButtonLoading(btn, loading, originalContent = null) {
+function setGoLoading(loading) {
+  const btn = elements.previewBtn;
   if (loading) {
-    btn.dataset.originalContent = btn.innerHTML;
     btn.disabled = true;
-    btn.innerHTML = `
-      <div class="spinner"></div>
-      <span>Processing...</span>
-    `;
+    btn.innerHTML = `<div class="spinner"></div><span>Fetching...</span>`;
   } else {
     btn.disabled = false;
-    btn.innerHTML = originalContent || btn.dataset.originalContent || "Button";
+    btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg><span>Go</span>`;
   }
 }
 
-/**
- * Poll for status updates
- */
+// ===========================================
+// Polling
+// ===========================================
 async function pollStatus(endpoint, statusEl, textEl, progressEl, onComplete, onError) {
   let pollCount = 0;
-  const maxPolls = 300; // 5 minutes max
+  const maxPolls = 300;
 
   const poll = async () => {
     try {
-      const response = await fetch(`${API_BASE}${endpoint}`);
-      const data = await response.json();
+      const res = await fetch(`${API_BASE}${endpoint}`);
+      const data = await res.json();
 
-      if (!data.success) {
-        throw new Error(data.error || "Unknown error");
-      }
+      if (!data.success) throw new Error(data.error || "Unknown error");
 
-      // Update progress
       if (progressEl && data.progress !== undefined) {
         progressEl.style.width = `${data.progress}%`;
       }
-
       if (textEl) {
-        textEl.textContent = `${data.status === "downloading" ? "Downloading" : "Processing"}... ${Math.round(data.progress || 0)}%`;
+        const label = data.status === "downloading" ? "Downloading" : "Processing";
+        textEl.textContent = `${label}... ${Math.round(data.progress || 0)}%`;
       }
 
       if (data.status === "completed") {
@@ -186,14 +187,12 @@ async function pollStatus(endpoint, statusEl, textEl, progressEl, onComplete, on
         onComplete(data);
         return;
       }
-
       if (data.status === "failed") {
         statusEl.classList.add("hidden");
         onError(new Error(data.error || "Processing failed"));
         return;
       }
 
-      // Continue polling
       pollCount++;
       if (pollCount < maxPolls) {
         setTimeout(poll, POLL_INTERVAL);
@@ -214,71 +213,48 @@ async function pollStatus(endpoint, statusEl, textEl, progressEl, onComplete, on
 // ===========================================
 // Frame Management
 // ===========================================
-
-/**
- * Load available frames from API
- */
 async function loadFrames() {
   try {
-    const response = await fetch(`${API_BASE}/frames`);
-    const data = await response.json();
+    const res = await fetch(`${API_BASE}/frames`);
+    const data = await res.json();
 
     if (data.success && data.frames.length > 0) {
       state.frames = data.frames;
       renderFrameOptions();
       elements.noFramesMsg.classList.add("hidden");
-      
-      // Preload frame images for instant switching
       preloadAllFrames();
-      
-      // Pre-select first frame for better UX (users usually want a frame)
+
+      // Pre-select first frame
       if (state.frames.length > 0) {
         state.selectedFrame = state.frames[0].id;
-        // Update UI to show selection
         setTimeout(() => {
-          const firstFrameOption = document.querySelector(`[data-frame="${state.frames[0].id}"]`);
-          if (firstFrameOption) {
-            document.querySelectorAll(".frame-option").forEach(opt => opt.classList.remove("selected"));
-            firstFrameOption.classList.add("selected");
-            
-            // Update preview overlay
-            const frameImg = `${API_BASE}/frames/${state.frames[0].id}.png`;
-            elements.videoPreview.style.backgroundImage = `url(${frameImg})`;
-            elements.videoPreview.style.backgroundSize = "contain";
-            elements.videoPreview.style.backgroundPosition = "center";
-            elements.videoPreview.style.backgroundRepeat = "no-repeat";
+          const first = document.querySelector(`[data-frame="${state.frames[0].id}"]`);
+          if (first) {
+            document.querySelectorAll(".frame-option").forEach(o => o.classList.remove("selected"));
+            first.classList.add("selected");
           }
-        }, 100);
+        }, 50);
       }
     } else {
       elements.noFramesMsg.classList.remove("hidden");
     }
-  } catch (err) {
-    console.error("Failed to load frames:", err);
+  } catch (_) {
     elements.noFramesMsg.classList.remove("hidden");
   }
 }
 
-/**
- * Render frame selection options
- */
 function renderFrameOptions() {
-  // Keep the "No Frame" option
   const noFrameOption = elements.frameOptions.querySelector('[data-frame="none"]');
   elements.frameOptions.innerHTML = "";
-  
-  if (noFrameOption) {
-    elements.frameOptions.appendChild(noFrameOption);
-  }
+  if (noFrameOption) elements.frameOptions.appendChild(noFrameOption);
 
-  // Add available frames
-  state.frames.forEach((frame) => {
+  state.frames.forEach(frame => {
     const option = document.createElement("button");
     option.className = "frame-option";
     option.dataset.frame = frame.id;
     option.innerHTML = `
       <div class="frame-thumb">
-        <img src="${API_BASE}${frame.path}" alt="${frame.name}" />
+        <img src="${API_BASE}${frame.path}" alt="${frame.name}" loading="lazy" />
       </div>
       <span>${frame.name}</span>
     `;
@@ -287,458 +263,306 @@ function renderFrameOptions() {
   });
 }
 
-/**
- * Select a frame - INSTANT preview, NO rendering
- */
 function selectFrame(frameId) {
-  console.log("Selecting frame:", frameId);
-  
-  // If selecting same frame, do nothing
-  if (state.selectedFrame === frameId) {
-    return;
-  }
-  
+  if (state.selectedFrame === frameId) return;
+
   state.selectedFrame = frameId;
-  
-  // Clear cached render when changing frames
   state.renderedVideoBlob = null;
   state.lastRenderedJobId = null;
   state.lastRenderedUrl = null;
+  state.bgRenderPromise = null;
 
-  // Update UI
-  document.querySelectorAll(".frame-option").forEach((opt) => {
+  document.querySelectorAll(".frame-option").forEach(opt => {
     opt.classList.toggle("selected", opt.dataset.frame === frameId);
   });
 
-  // Update preview overlay INSTANTLY (no backend call)
   updateFramePreview(frameId);
-  
-  // Preload frame image for smooth switching
+
   if (frameId !== "none") {
     preloadFrameImage(frameId);
-  }
-  
-  // Enable download/share buttons when frame is selected
-  if (frameId !== "none") {
     elements.downloadBtn.disabled = false;
     elements.shareBtn.disabled = false;
+
+    // Start background pre-render immediately
+    if (state.videoId) {
+      startBackgroundPreRender();
+    }
   }
 }
 
-/**
- * Update frame preview overlay
- */
 function updateFramePreview(frameId) {
-  console.log("Updating preview for frame:", frameId);
   const overlay = elements.frameOverlay;
   const preview = elements.framePreview;
 
-  // Reset completely
   overlay.style.backgroundImage = "";
   overlay.style.backgroundColor = "";
   overlay.classList.remove("visible");
   preview.removeAttribute("data-frame");
 
-  if (frameId === "none") {
-    console.log("No frame selected");
-    return;
-  }
+  if (frameId === "none") return;
 
-  // Check if it's a custom CSS frame or an image frame
   const cssFrames = ["blue", "gold", "neon", "gradient"];
-  
   if (cssFrames.includes(frameId)) {
-    console.log("CSS frame:", frameId);
     preview.setAttribute("data-frame", frameId);
     overlay.classList.add("visible");
   } else {
-    // Image frame - show it over the video
-    const frame = state.frames.find((f) => f.id === frameId);
+    const frame = state.frames.find(f => f.id === frameId);
     if (frame) {
-      console.log("Image frame found:", frame);
-      // Use API_BASE to load from Railway backend
-      const imageUrl = `${API_BASE}${encodeURI(frame.path)}`;
-      console.log("Loading frame image from:", imageUrl);
-      
-      // Set background image
-      overlay.style.backgroundImage = `url("${imageUrl}")`;
+      overlay.style.backgroundImage = `url("${API_BASE}${encodeURI(frame.path)}")`;
       overlay.classList.add("visible");
-      
-      console.log("Frame overlay class added: visible");
-      console.log("Overlay classList:", overlay.classList);
-    } else {
-      console.log("Frame not found in state.frames:", frameId);
     }
   }
 }
 
-/**
- * Preload frame image for faster switching
- */
 function preloadFrameImage(frameId) {
-  if (frameImageCache.has(frameId)) {
-    return; // Already cached
-  }
-  
-  const frame = state.frames.find((f) => f.id === frameId);
+  if (frameImageCache.has(frameId)) return;
+  const frame = state.frames.find(f => f.id === frameId);
   if (frame && frame.path) {
     const img = new Image();
-    img.src = `${window.location.origin}${frame.path}`;
+    img.src = `${API_BASE}${frame.path}`;
     frameImageCache.set(frameId, img);
-    console.log("Preloaded frame:", frameId);
   }
 }
 
-/**
- * Preload all available frames for instant switching
- */
 function preloadAllFrames() {
-  state.frames.forEach(frame => {
-    if (frame.id && frame.id !== "none") {
-      preloadFrameImage(frame.id);
-    }
+  state.frames.forEach(f => {
+    if (f.id && f.id !== "none") preloadFrameImage(f.id);
   });
-  console.log(`Preloaded ${state.frames.length} frames`);
 }
 
-/**
- * Render video with selected frame (called only on Download/Share)
- * Returns blob of rendered video
- */
+// ===========================================
+// Background Pre-Render
+// ===========================================
+function startBackgroundPreRender() {
+  if (!state.videoId || state.selectedFrame === "none") return;
+
+  // Don't re-start if already rendering this combination
+  state.bgRenderPromise = (async () => {
+    try {
+      const res = await fetch(`${API_BASE}/video/render`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ videoId: state.videoId, frameId: state.selectedFrame }),
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (!data.success) return null;
+
+      const jobId = await pollRenderJob(data.jobId);
+      state.lastRenderedJobId = jobId;
+      state.lastRenderedUrl = `${API_BASE}/video/download/${jobId}`;
+
+      // Pre-fetch the blob
+      const videoRes = await fetch(state.lastRenderedUrl);
+      state.renderedVideoBlob = await videoRes.blob();
+      return jobId;
+    } catch (_) {
+      return null;
+    }
+  })();
+}
+
+// ===========================================
+// Render
+// ===========================================
 async function renderVideoWithFrame(progressCallback) {
   if (!state.videoId || state.selectedFrame === "none") {
     throw new Error("No video or frame selected");
   }
-  
-  // Check if already rendered
-  if (state.renderedVideoBlob) {
-    console.log("Using cached rendered video");
-    return state.renderedVideoBlob;
+
+  // If pre-render already finished
+  if (state.renderedVideoBlob) return state.renderedVideoBlob;
+
+  // If pre-render is in progress, wait for it
+  if (state.bgRenderPromise) {
+    const jobId = await state.bgRenderPromise;
+    if (jobId && state.renderedVideoBlob) return state.renderedVideoBlob;
   }
-  
-  console.log("Starting render...");
-  
-  // Start render
-  const response = await fetch(`${API_BASE}/video/render`, {
+
+  // Start fresh render
+  const res = await fetch(`${API_BASE}/video/render`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      videoId: state.videoId,
-      frameId: state.selectedFrame,
-    }),
+    body: JSON.stringify({ videoId: state.videoId, frameId: state.selectedFrame }),
   });
-  
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.error || "Rendering failed");
+
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.error || "Rendering failed");
   }
-  
-  const { jobId } = await response.json();
-  console.log("Render started, jobId:", jobId);
-  
-  // Poll for completion
+
+  const { jobId } = await res.json();
+
+  // Poll completion
   while (true) {
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    const statusResponse = await fetch(`${API_BASE}/video/render/${jobId}`);
-    const status = await statusResponse.json();
-    
+    await new Promise(r => setTimeout(r, POLL_INTERVAL));
+    const statusRes = await fetch(`${API_BASE}/video/render/${jobId}`);
+    const status = await statusRes.json();
+
     if (status.status === "completed") {
-      console.log("Render completed!");
-      
-      // Download rendered video
-      const videoResponse = await fetch(`${API_BASE}/video/download/${jobId}`);
-      const blob = await videoResponse.blob();
-      
-      // Cache it
+      const videoRes = await fetch(`${API_BASE}/video/download/${jobId}`);
+      const blob = await videoRes.blob();
       state.renderedVideoBlob = blob;
       state.lastRenderedJobId = jobId;
       state.lastRenderedUrl = `${API_BASE}/video/download/${jobId}`;
-      
       return blob;
-    } else if (status.status === "failed") {
+    }
+    if (status.status === "failed") {
       throw new Error(status.error || "Rendering failed");
     }
-    
-    // Update progress
     if (progressCallback && status.progress) {
       progressCallback(status.progress);
     }
   }
 }
 
-/**
- * Create a subtle render progress indicator
- */
-function createRenderIndicator() {
-  const indicator = document.createElement("div");
-  indicator.id = "renderIndicator";
-  indicator.style.cssText = `
-    display: none;
-    position: fixed;
-    bottom: 20px;
-    right: 20px;
-    background: linear-gradient(135deg, #007AFF, #34C759);
-    color: white;
-    padding: 12px 16px;
-    border-radius: 8px;
-    font-size: 12px;
-    font-weight: 500;
-    align-items: center;
-    gap: 8px;
-    box-shadow: 0 4px 12px rgba(0, 122, 255, 0.3);
-    z-index: 9999;
-    animation: slideInUp 0.3s ease-out;
-  `;
-  
-  indicator.innerHTML = `
-    <div style="width: 12px; height: 12px; border: 2px solid white; border-top: 2px solid transparent; border-radius: 50%; animation: spin 1s linear infinite;"></div>
-    <span>Preparing frame...</span>
-  `;
-  
-  document.body.appendChild(indicator);
-  
-  // Inject animation if not already present
-  if (!document.getElementById("renderIndicatorStyles")) {
-    const style = document.createElement("style");
-    style.id = "renderIndicatorStyles";
-    style.textContent = `
-      @keyframes slideInUp {
-        from {
-          opacity: 0;
-          transform: translateY(20px);
-        }
-        to {
-          opacity: 1;
-          transform: translateY(0);
-        }
-      }
-      @keyframes spin {
-        to { transform: rotate(360deg); }
-      }
-    `;
-    document.head.appendChild(style);
-  }
-  
-  return indicator;
-}
+async function pollRenderJob(jobId) {
+  let pollCount = 0;
+  const maxPolls = 300;
+  let delay = 800;
 
-/**
- * Update frame preview overlay
- */
+  while (pollCount < maxPolls) {
+    await new Promise(r => setTimeout(r, delay));
+
+    try {
+      const res = await fetch(`${API_BASE}/video/render/${jobId}`);
+      if (res.status === 429) { delay = Math.min(delay * 1.5, 8000); pollCount++; continue; }
+      if (res.status === 404) { delay = Math.min(delay + 200, 3000); pollCount++; continue; }
+      if (!res.ok) { pollCount++; continue; }
+
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || "Render failed");
+      if (delay > 800) delay = 800;
+      if (data.status === "completed") return jobId;
+      if (data.status === "failed") throw new Error(data.error || "Render failed");
+      pollCount++;
+    } catch (err) {
+      if (err.message.includes("Render") || err.message.includes("failed")) throw err;
+      pollCount++;
+    }
+  }
+
+  throw new Error("Render timeout");
+}
 
 // ===========================================
 // Video Operations
 // ===========================================
-
-/**
- * Fetch and preview video from URL
- */
 async function fetchVideo() {
   const url = elements.videoUrl.value.trim();
+  if (!url) { showToast("Paste a video URL first", "warning"); return; }
 
-  if (!url) {
-    showToast("Please paste a video URL first", "warning");
+  if (!state.serverReady) {
+    showToast("Server is still starting up, please wait...", "warning");
     return;
   }
 
   state.isProcessing = true;
-  setButtonLoading(elements.previewBtn, true);
+  setGoLoading(true);
   elements.fetchProgress.style.width = "0%";
 
   try {
-    // Start the download
-    const response = await fetch(`${API_BASE}/video/resolve`, {
+    const res = await fetch(`${API_BASE}/video/resolve`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ url }),
     });
 
-    const data = await response.json();
-
-    if (!data.success) {
-      throw new Error(data.error || "Failed to start download");
-    }
-
-    if (!data.videoId) {
-      throw new Error("No videoId returned from server");
-    }
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || "Failed to start download");
+    if (!data.videoId) throw new Error("No videoId returned");
 
     state.videoId = data.videoId;
-    console.log("Download started, videoId:", state.videoId);
     elements.fetchStatusText.textContent = "Fetching video...";
 
-    // Poll for download status
     pollStatus(
       `/video/status/${data.videoId}`,
       elements.fetchStatus,
       elements.fetchStatusText,
       elements.fetchProgress,
-      // On complete
       () => {
         showVideoPreview();
-        showToast("Video loaded successfully!", "success");
+        showToast("Video loaded!", "success");
         state.isProcessing = false;
-        setButtonLoading(elements.previewBtn, false, `
-          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polygon points="5 3 19 12 5 21 5 3"></polygon>
-          </svg>
-          <span>Fetch & Preview</span>
-        `);
+        setGoLoading(false);
       },
-      // On error
       (err) => {
         showToast(err.message || "Failed to download video", "error");
         state.isProcessing = false;
-        setButtonLoading(elements.previewBtn, false, `
-          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polygon points="5 3 19 12 5 21 5 3"></polygon>
-          </svg>
-          <span>Fetch & Preview</span>
-        `);
+        setGoLoading(false);
       }
     );
   } catch (err) {
-    console.error("Fetch error:", err);
     showToast(err.message || "Failed to connect to server", "error");
     state.isProcessing = false;
-    setButtonLoading(elements.previewBtn, false);
+    setGoLoading(false);
     elements.fetchStatus.classList.add("hidden");
   }
 }
 
-/**
- * Show video preview
- */
 function showVideoPreview() {
-  // Validate videoId exists
-  if (!state.videoId) {
-    console.error("Error: videoId is not set");
-    showToast("Error: Video ID missing", "error");
-    return;
-  }
+  if (!state.videoId) { showToast("Error: Video ID missing", "error"); return; }
 
   const videoUrl = `${API_BASE}/video/preview/${state.videoId}?t=${Date.now()}`;
-  
-  console.log("Loading video from:", videoUrl);
-  console.log("API_BASE:", API_BASE);
-  console.log("videoId:", state.videoId);
-  
-  // Clear and reset video player completely
+
   elements.videoPlayer.innerHTML = "";
-  
-  // Create source element properly
-  const sourceEl = document.createElement("source");
-  sourceEl.src = videoUrl;
-  sourceEl.type = "video/mp4";
-  
-  // Append source to video element
-  elements.videoPlayer.appendChild(sourceEl);
-  
-  // Set mobile-friendly attributes
-  elements.videoPlayer.setAttribute('playsinline', 'true');
-  elements.videoPlayer.setAttribute('webkit-playsinline', 'true');
+  const source = document.createElement("source");
+  source.src = videoUrl;
+  source.type = "video/mp4";
+  elements.videoPlayer.appendChild(source);
+  elements.videoPlayer.setAttribute("playsinline", "true");
+  elements.videoPlayer.setAttribute("webkit-playsinline", "true");
   elements.videoPlayer.preload = "metadata";
   elements.videoPlayer.load();
-  
-  // Add loadeddata event for successful preview
-  elements.videoPlayer.addEventListener('loadeddata', function onLoaded() {
-    console.log('Video preview loaded successfully');
-    elements.videoPlayer.removeEventListener('loadeddata', onLoaded);
-  }, { once: true });
-  
-  console.log("Video player HTML:", elements.videoPlayer.outerHTML);
-  
-  // Add error handler for video playback issues
-  elements.videoPlayer.onerror = async (e) => {
+
+  elements.videoPlayer.onerror = () => {
     const error = elements.videoPlayer.error;
-    let errorMsg = "Failed to load video";
-    
+    let msg = "Failed to load video";
     if (error) {
-      console.error("Video error code:", error.code, "message:", error.message);
-      switch(error.code) {
-        case error.MEDIA_ERR_ABORTED:
-          errorMsg = "Video loading aborted";
-          break;
-        case error.MEDIA_ERR_NETWORK:
-          errorMsg = "Network error loading video";
-          break;
-        case error.MEDIA_ERR_DECODE:
-          errorMsg = "Video codec not supported or file corrupted";
-          break;
-        case error.MEDIA_ERR_SRC_NOT_SUPPORTED:
-          errorMsg = "Video format not supported";
-          break;
-        default:
-          errorMsg = `Video error (code ${error.code})`;
+      switch (error.code) {
+        case error.MEDIA_ERR_NETWORK: msg = "Network error loading video"; break;
+        case error.MEDIA_ERR_DECODE: msg = "Video codec not supported"; break;
+        case error.MEDIA_ERR_SRC_NOT_SUPPORTED: msg = "Video format not supported"; break;
       }
     }
-    
-    // Get debug info
-    try {
-      const debugRes = await fetch(`${API_BASE}/video/debug/${state.videoId}`);
-      const debugData = await debugRes.json();
-      console.error("Debug info:", debugData);
-      console.error("Expected URL:", videoUrl);
-    } catch (err) {
-      console.error("Failed to fetch debug info:", err);
-    }
-    
-    showToast(errorMsg + ". Check console for details.", "error");
+    showToast(msg, "error");
   };
-  
+
   elements.previewSection.classList.remove("hidden");
   elements.downloadSection.classList.remove("hidden");
 
-  // Scroll to preview
   setTimeout(() => {
     elements.previewSection.scrollIntoView({ behavior: "smooth", block: "start" });
   }, 100);
-  
-  // Update frame preview if a frame is pre-selected
+
   if (state.selectedFrame && state.selectedFrame !== "none") {
-    console.log("Video loaded with frame pre-selected:", state.selectedFrame);
     updateFramePreview(state.selectedFrame);
+    // Start pre-render immediately
+    startBackgroundPreRender();
   }
 }
 
-/**
- * Download framed video - renders on-demand
- */
+// ===========================================
+// Download
+// ===========================================
 async function downloadVideo() {
-  if (!state.videoId) {
-    showToast("Please fetch a video first", "warning");
-    return;
-  }
+  if (!state.videoId) { showToast("Fetch a video first", "warning"); return; }
 
-  // If no frame selected, just download the original
   if (state.selectedFrame === "none") {
     downloadOriginalVideo();
     return;
   }
 
   state.isProcessing = true;
-  setButtonLoading(elements.downloadBtn, true, `
-    <svg class="icon spinner" viewBox="0 0 24 24">
-      <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none" opacity="0.25"/>
-      <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" opacity="0.75"/>
-    </svg>
-    <span>Rendering...</span>
-  `);
+  const btn = elements.downloadBtn;
+  btn.disabled = true;
+  btn.querySelector("span").textContent = "Rendering...";
 
   try {
-    // Render video with selected frame
     const blob = await renderVideoWithFrame((progress) => {
-      elements.downloadBtn.innerHTML = `
-        <svg class="icon spinner" viewBox="0 0 24 24">
-          <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none" opacity="0.25"/>
-          <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" opacity="0.75"/>
-        </svg>
-        <span>Rendering ${progress}%</span>
-      `;
+      btn.querySelector("span").textContent = `Rendering ${progress}%`;
     });
-    
-    // Trigger download
+
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -747,40 +571,26 @@ async function downloadVideo() {
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
-
     showToast("Download started!", "success");
   } catch (err) {
-    console.error("Download error:", err);
     showToast(err.message || "Failed to render video", "error");
   } finally {
     state.isProcessing = false;
-    setButtonLoading(elements.downloadBtn, false, `
-      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-        <polyline points="7 10 12 15 17 10"></polyline>
-        <line x1="12" y1="15" x2="12" y2="3"></line>
-      </svg>
-      <span>Download Framed Video</span>
-    `);
+    btn.disabled = false;
+    btn.querySelector("span").textContent = "Download";
   }
 }
 
-/**
- * Download original video without frame
- */
 async function downloadOriginalVideo() {
-  setButtonLoading(elements.downloadBtn, true);
+  const btn = elements.downloadBtn;
+  btn.disabled = true;
+  btn.querySelector("span").textContent = "Downloading...";
 
   try {
-    const response = await fetch(`${API_BASE}/video/preview/${state.videoId}`);
-    
-    if (!response.ok) {
-      throw new Error("Failed to download video");
-    }
-
-    const blob = await response.blob();
+    const res = await fetch(`${API_BASE}/video/preview/${state.videoId}`);
+    if (!res.ok) throw new Error("Failed to download video");
+    const blob = await res.blob();
     const url = URL.createObjectURL(blob);
-    
     const a = document.createElement("a");
     a.href = url;
     a.download = `video-${Date.now()}.mp4`;
@@ -788,938 +598,239 @@ async function downloadOriginalVideo() {
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
-
     showToast("Download started!", "success");
   } catch (err) {
-    console.error("Download error:", err);
     showToast("Failed to download video", "error");
   } finally {
-    setButtonLoading(elements.downloadBtn, false, `
-      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-        <polyline points="7 10 12 15 17 10"></polyline>
-        <line x1="12" y1="15" x2="12" y2="3"></line>
-      </svg>
-      <span>Download Framed Video</span>
-    `);
+    btn.disabled = false;
+    btn.querySelector("span").textContent = "Download";
   }
 }
 
-/**
- * Trigger file download from URL
- */
-function triggerDownload(url) {
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `framed-video-${Date.now()}.mp4`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-}
-
-/**
- * Share video using Web Share API
- * Renders on-demand if frame is selected
- */
+// ===========================================
+// Share
+// ===========================================
 async function shareVideo() {
-  if (!state.videoId) {
-    showToast("Please fetch a video first", "warning");
-    return;
-  }
+  if (!state.videoId) { showToast("Fetch a video first", "warning"); return; }
 
   try {
     let blob;
-    
-    // If frame is selected, render it first
     if (state.selectedFrame !== "none") {
       showShareLoadingModal(true);
-      
-      blob = await renderVideoWithFrame((progress) => {
-        // Update modal with progress
-        const modal = document.querySelector('.share-loading-modal');
-        if (modal) {
-          const text = modal.querySelector('p');
-          if (text) {
-            text.textContent = `Rendering with frame... ${progress}%`;
-          }
-        }
-      });
-      
+      blob = await renderVideoWithFrame();
       closeShareLoadingModal();
     } else {
-      // No frame, use original video
       showShareLoadingModal(false);
-      
-      const response = await fetch(`${API_BASE}/video/preview/${state.videoId}`);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch video: ${response.status}`);
-      }
-      blob = await response.blob();
-      
+      const res = await fetch(`${API_BASE}/video/preview/${state.videoId}`);
+      if (!res.ok) throw new Error("Failed to fetch video");
+      blob = await res.blob();
       closeShareLoadingModal();
     }
 
-    if (blob.size === 0) {
-      throw new Error("Video blob is empty");
-    }
-
-    // Share the video
+    if (blob.size === 0) throw new Error("Video blob is empty");
     await shareBlob(blob);
-
   } catch (err) {
-    console.error("Share error:", err);
     closeShareLoadingModal();
-    showToast(err.message || "Unable to share video", "error");
+    if (err.name !== "AbortError") {
+      showToast(err.message || "Unable to share video", "error");
+    }
   }
 }
 
-/**
- * Share a Blob using native Web Share API
- * Must be called within a user gesture context
- */
 async function shareBlob(blob) {
-  // Check if Web Share API is supported
   if (!navigator.share || !navigator.canShare) {
     throw new Error("Share API not supported on this device");
   }
-
-  try {
-    const file = new File([blob], `framed-video-${Date.now()}.mp4`, {
-      type: "video/mp4",
-    });
-
-    const shareData = {
-      files: [file],
-      title: "My Framed Video",
-      text: "Check out my framed video!",
-    };
-
-    // Validate that we can share this data
-    if (!navigator.canShare(shareData)) {
-      throw new Error("Cannot share video files on this device");
-    }
-
-    // Share immediately - this opens the native share sheet
-    await navigator.share(shareData);
-    showToast("Video shared successfully!", "success");
-    console.log("Video shared via Web Share API");
-
-  } catch (err) {
-    if (err.name === "AbortError") {
-      console.log("Share cancelled by user");
-      // Don't show error toast for user cancellation
-      return;
-    }
-    throw err;
-  }
+  const file = new File([blob], `framed-video-${Date.now()}.mp4`, { type: "video/mp4" });
+  const shareData = { files: [file], title: "My Framed Video", text: "Check out this video!" };
+  if (!navigator.canShare(shareData)) throw new Error("Cannot share video files on this device");
+  await navigator.share(shareData);
+  showToast("Video shared!", "success");
 }
 
-/**
- * Render video in background without blocking user gesture
- * Returns the jobId when complete
- */
-async function renderVideoInBackground() {
-  if (!state.videoId || state.selectedFrame === "none") {
-    return null;
-  }
-
-  try {
-    console.log("Starting background render...");
-    // Start the render
-    const response = await fetch(`${API_BASE}/video/render`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        videoId: state.videoId,
-        frameId: state.selectedFrame,
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Render request failed with status ${response.status}`);
-    }
-
-    const data = await response.json();
-    console.log("Render started:", data);
-
-    if (!data.success) {
-      throw new Error(data.error || "Failed to start render");
-    }
-
-    const jobId = data.jobId;
-    console.log("Polling for job:", jobId);
-
-    // Poll for render completion with timeout
-    return await pollRenderJobWithTimeout(jobId, 300000); // 5 minute timeout
-
-  } catch (err) {
-    console.error("Background render error:", err);
-    throw err;
-  }
-}
-
-/**
- * Poll for render job completion with timeout
- */
-async function pollRenderJobWithTimeout(jobId, timeoutMs) {
-  return Promise.race([
-    pollRenderJob(jobId),
-    new Promise((_, reject) => 
-      setTimeout(() => reject(new Error("Render timeout - video is taking too long to process")), timeoutMs)
-    )
-  ]);
-}
-
-/**
- * Poll for render job completion
- */
-async function pollRenderJob(jobId) {
-  let pollCount = 0;
-  const maxPolls = 300; // 5 minutes max with 1 second delays
-  let pollDelay = 1000; // Start with 1 second
-
-  while (pollCount < maxPolls) {
-    await new Promise(resolve => setTimeout(resolve, pollDelay));
-    
-    try {
-      const statusResponse = await fetch(`${API_BASE}/video/render/${jobId}`);
-      
-      // Handle rate limiting
-      if (statusResponse.status === 429) {
-        pollDelay = Math.min(pollDelay * 1.5, 10000);
-        console.warn(`Rate limited. Next poll in ${pollDelay}ms`);
-        pollCount++;
-        continue;
-      }
-
-      // Handle job not found (hasn't been stored yet)
-      if (statusResponse.status === 404) {
-        console.warn(`Job ${jobId} not yet available, retrying...`);
-        // Increase poll delay gradually if job not found
-        pollDelay = Math.min(pollDelay + 200, 3000);
-        pollCount++;
-        continue;
-      }
-
-      if (!statusResponse.ok) {
-        console.warn(`Status check returned ${statusResponse.status}, retrying...`);
-        pollCount++;
-        continue;
-      }
-
-      let statusData;
-      try {
-        statusData = await statusResponse.json();
-      } catch (parseErr) {
-        console.error(`Failed to parse response: ${parseErr.message}`);
-        pollCount++;
-        continue;
-      }
-      
-      if (!statusData) {
-        console.warn(`Empty status response, retrying...`);
-        pollCount++;
-        continue;
-      }
-
-      if (!statusData.success) {
-        throw new Error(statusData.error || "Render failed");
-      }
-
-      // Reset poll delay on successful response
-      if (pollDelay > 1000) {
-        pollDelay = 1000;
-      }
-
-      const status = statusData.status;
-      const errorMsg = statusData.error ? ` - ${statusData.error}` : '';
-      console.log(`Render job status: ${status} (${statusData.progress || 0}%)${errorMsg}`);
-
-      if (status === "completed") {
-        console.log("Render completed successfully!");
-        return jobId;
-      }
-
-      if (status === "failed") {
-        throw new Error(statusData.error || "Render job failed");
-      }
-
-      // Still processing - continue polling
-      pollCount++;
-
-    } catch (pollErr) {
-      console.error(`Poll error: ${pollErr.message}`);
-      // Re-throw errors that are not transient
-      if (pollErr.message.includes("Render") || pollErr.message.includes("failed")) {
-        throw pollErr;
-      }
-      // For transient errors, continue retrying
-      pollCount++;
-    }
-  }
-
-  throw new Error("Render timeout after 5 minutes - video may be too large or your server is overloaded");
-}
-
-/**
- * Show loading modal for share operation
- */
-function showShareLoadingModal(showRenderProgress = false) {
-  // Create modal HTML
-  const modalHtml = `
-    <div class="share-modal-overlay" id="shareModalOverlay">
-      <div class="share-modal">
-        <div class="share-modal-content">
-          <div class="share-spinner-large"></div>
-          <h3 class="share-modal-title">Preparing Video</h3>
-          <p class="share-modal-text" id="shareModalText">
-            ${showRenderProgress 
-              ? "Rendering with frame..." 
-              : "Opening share options..."
-            }
-          </p>
-          ${showRenderProgress 
-            ? '<div class="share-modal-progress"><div class="share-modal-progress-bar" id="shareModalProgressBar"></div></div>'
-            : ''
-          }
-        </div>
-      </div>
-    </div>
-  `;
-
-  // Remove existing modal if present
-  const existingModal = document.getElementById("shareModalOverlay");
-  if (existingModal) {
-    existingModal.remove();
-  }
-
-  // Insert modal into DOM
-  document.body.insertAdjacentHTML("beforeend", modalHtml);
-
-  // Add styles if not already present
-  if (!document.getElementById("shareModalStyles")) {
-    const style = document.createElement("style");
-    style.id = "shareModalStyles";
-    style.textContent = `
-      .share-modal-overlay {
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background: rgba(0, 0, 0, 0.5);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 10000;
-        backdrop-filter: blur(4px);
-      }
-
-      .share-modal {
-        background: white;
-        border-radius: 16px;
-        padding: 32px;
-        max-width: 320px;
-        width: 90%;
-        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-        text-align: center;
-        animation: slideUp 0.3s ease-out;
-      }
-
-      @keyframes slideUp {
-        from {
-          opacity: 0;
-          transform: translateY(20px);
-        }
-        to {
-          opacity: 1;
-          transform: translateY(0);
-        }
-      }
-
-      .share-modal-content {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 16px;
-      }
-
-      .share-spinner-large {
-        width: 48px;
-        height: 48px;
-        border: 4px solid #f0f0f0;
-        border-top-color: #007AFF;
-        border-radius: 50%;
-        animation: spin 1s linear infinite;
-      }
-
-      @keyframes spin {
-        to { transform: rotate(360deg); }
-      }
-
-      .share-modal-title {
-        font-size: 18px;
-        font-weight: 600;
-        color: #000;
-        margin: 0;
-      }
-
-      .share-modal-text {
-        font-size: 14px;
-        color: #666;
-        margin: 0;
-      }
-
-      .share-modal-progress {
-        width: 100%;
-        height: 4px;
-        background: #f0f0f0;
-        border-radius: 2px;
-        overflow: hidden;
-        margin-top: 8px;
-      }
-
-      .share-modal-progress-bar {
-        height: 100%;
-        background: linear-gradient(90deg, #007AFF, #34C759);
-        width: 0%;
-        transition: width 0.3s ease;
-      }
-    `;
-    document.head.appendChild(style);
-  }
-}
-
-/**
- * Close share loading modal
- */
-function closeShareLoadingModal() {
-  const modal = document.getElementById("shareModalOverlay");
-  if (modal) {
-    modal.style.animation = "slideUp 0.3s ease-out reverse";
-    setTimeout(() => modal.remove(), 300);
-  }
-}
-
-/**
- * Update share modal with rendered video once ready
- */
-async function updateShareModalWithRenderedVideo() {
-  const modal = document.getElementById("shareModalOverlay");
-  if (!modal) return;
-
-  const textEl = document.getElementById("shareModalText");
-  const progressBar = document.getElementById("shareModalProgressBar");
-
-  try {
-    if (textEl) {
-      textEl.textContent = "Render complete! Fetching optimized version...";
-    }
-
-    // Fetch the rendered video
-    const renderedUrl = state.lastRenderedUrl;
-    const response = await fetch(renderedUrl);
-    
-    if (!response.ok) {
-      throw new Error("Failed to fetch rendered video");
-    }
-
-    const blob = await response.blob();
-    
-    if (textEl) {
-      textEl.textContent = "Ready to share!";
-    }
-
-    if (progressBar) {
-      progressBar.style.width = "100%";
-    }
-
-    // Close modal after a brief delay
-    setTimeout(() => closeShareLoadingModal(), 1000);
-
-  } catch (err) {
-    console.error("Failed to update with rendered video:", err);
-    if (textEl) {
-      textEl.textContent = "Ready to share!";
-    }
-    setTimeout(() => closeShareLoadingModal(), 1500);
-  }
-}
-
-/**
- * Get shareable video URL
- */
-function getShareableVideoUrl() {
-  // If a frame was rendered, use the rendered video URL
-  if (state.lastRenderedJobId && state.selectedFrame !== "none") {
-    return `${window.location.origin}/api/video/download/${state.lastRenderedJobId}`;
-  }
-  // Otherwise, return the original video URL
-  return `${window.location.origin}/api/video/preview/${state.videoId}`;
-}
-
-/**
- * Share video to WhatsApp using native share or WhatsApp Web
- */
 async function shareToWhatsApp() {
-  if (!state.videoId) {
-    showToast("Please fetch a video first", "warning");
-    return;
-  }
+  if (!state.videoId) { showToast("Fetch a video first", "warning"); return; }
 
-  // Check if rendering is needed (frame selected but not yet rendered)
   const needsRendering = state.selectedFrame !== "none" && !state.lastRenderedJobId;
 
   try {
-    let blob;
-    let videoUrl;
+    let blob, videoUrl;
 
-    // If frame is selected and not yet rendered, render it first
     if (needsRendering) {
       showShareLoadingModal(true);
-      console.log(`Starting render with frameId: "${state.selectedFrame}"`);
-      
       try {
-        // Render the video with the frame - this will block until complete
-        const jobId = await renderVideoInBackground();
-        if (jobId) {
-          state.lastRenderedJobId = jobId;
-          state.lastRenderedUrl = `${API_BASE}/video/download/${jobId}`;
-          videoUrl = state.lastRenderedUrl;
-          console.log("Render complete, fetching rendered video...");
-        } else {
-          throw new Error("Failed to start render job");
-        }
+        // Try to use pre-rendered blob
+        blob = await renderVideoWithFrame();
+        videoUrl = state.lastRenderedUrl;
       } catch (renderErr) {
         closeShareLoadingModal();
         showToast(renderErr.message || "Failed to render video", "error");
         return;
       }
     } else {
-      // Use already rendered video or original video
       showShareLoadingModal(false);
-      
-      if (state.lastRenderedJobId && state.selectedFrame !== "none") {
-        videoUrl = state.lastRenderedUrl;
-      } else {
-        videoUrl = `${API_BASE}/video/preview/${state.videoId}`;
-      }
+      videoUrl = state.lastRenderedJobId && state.selectedFrame !== "none"
+        ? state.lastRenderedUrl
+        : `${API_BASE}/video/preview/${state.videoId}`;
+
+      const res = await fetch(videoUrl);
+      if (!res.ok) throw new Error("Failed to fetch video");
+      blob = await res.blob();
     }
 
-    // Fetch the video as a blob
-    const response = await fetch(videoUrl);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch video: ${response.status}`);
-    }
-
-    blob = await response.blob();
-    console.log(`Video blob fetched: ${blob.size} bytes`);
-
-    if (blob.size === 0) {
-      throw new Error("Video blob is empty - render may have failed");
-    }
-
+    if (blob.size === 0) throw new Error("Video blob is empty");
     closeShareLoadingModal();
 
-    // Try to use native share first (on mobile)
+    // Try native share first (mobile)
     if (navigator.share && navigator.canShare) {
       try {
-        const file = new File([blob], `framed-video-${Date.now()}.mp4`, {
-          type: "video/mp4",
-        });
-
-        const shareData = {
-          files: [file],
-          title: "My Framed Video",
-          text: "Check out my framed video!",
-        };
-
+        const file = new File([blob], `framed-video-${Date.now()}.mp4`, { type: "video/mp4" });
+        const shareData = { files: [file], title: "My Framed Video" };
         if (navigator.canShare(shareData)) {
           await navigator.share(shareData);
-          showToast("Video shared via WhatsApp!", "success");
+          showToast("Video shared!", "success");
           return;
         }
-      } catch (err) {
-        console.log("Native share not available, falling back to WhatsApp Web");
-      }
+      } catch (_) { /* fallback below */ }
     }
 
-    // Fallback: Open WhatsApp Web with shareable link
-    try {
-      const shareableUrl = getShareableVideoUrl();
-      const message = encodeURIComponent(
-        `Check out my framed video! ${shareableUrl}`
-      );
-      window.open(`https://wa.me/?text=${message}`, "_blank");
-      showToast("click the WhatsApp again to share", "success");
-    } catch (err) {
-      throw new Error("Failed to open WhatsApp");
-    }
-
+    // Fallback: WhatsApp Web link
+    const shareableUrl = getShareableVideoUrl();
+    const message = encodeURIComponent(`Check out my framed video! ${shareableUrl}`);
+    window.open(`https://wa.me/?text=${message}`, "_blank");
+    showToast("Opening WhatsApp...", "success");
   } catch (err) {
-    console.error("WhatsApp share error:", err);
     closeShareLoadingModal();
     showToast(err.message || "Failed to share to WhatsApp", "error");
   }
 }
 
-/**
- * Copy shareable video link to clipboard
- */
-async function copyVideoLink() {
-  if (!state.videoId) {
-    showToast("Please fetch a video first", "warning");
-    return;
+function getShareableVideoUrl() {
+  if (state.lastRenderedJobId && state.selectedFrame !== "none") {
+    return `${window.location.origin}/api/video/download/${state.lastRenderedJobId}`;
   }
+  return `${window.location.origin}/api/video/preview/${state.videoId}`;
+}
 
-  // Check if rendering is needed
+async function copyVideoLink() {
+  if (!state.videoId) { showToast("Fetch a video first", "warning"); return; }
+
   const needsRendering = state.selectedFrame !== "none" && !state.lastRenderedJobId;
 
-  // Show loading modal if rendering is needed
   if (needsRendering) {
     showShareLoadingModal(true);
-
     try {
-      // Render the video in background
-      const jobId = await renderVideoInBackground();
-      if (jobId) {
-        state.lastRenderedJobId = jobId;
-        state.lastRenderedUrl = `${API_BASE}/video/download/${jobId}`;
-      }
+      await renderVideoWithFrame();
       closeShareLoadingModal();
     } catch (err) {
-      console.error("Render error:", err);
       closeShareLoadingModal();
-      showToast("Failed to render video for copying", "error");
+      showToast("Failed to render video", "error");
       return;
     }
   }
 
   try {
-    const shareableUrl = getShareableVideoUrl();
-    await navigator.clipboard.writeText(shareableUrl);
-    showToast("Link copied to clipboard!", "success");
-  } catch (err) {
-    console.error("Copy error:", err);
+    await navigator.clipboard.writeText(getShareableVideoUrl());
+    showToast("Link copied!", "success");
+  } catch (_) {
     showToast("Failed to copy link", "error");
   }
 }
 
-/**
- * Switch between tabs
- */
-function switchTab(tabName) {
-  // Hide all tabs
-  document.querySelectorAll(".tab-content").forEach((tab) => {
-    tab.classList.remove("tab-active");
-  });
+// ===========================================
+// Share Loading Modal
+// ===========================================
+function showShareLoadingModal(showRenderProgress = false) {
+  const existing = document.getElementById("shareModalOverlay");
+  if (existing) existing.remove();
 
-  // Deactivate all buttons
-  document.querySelectorAll(".tab-button").forEach((btn) => {
-    btn.classList.remove("tab-active");
-  });
-
-  // Show selected tab
-  const selectedTab = document.getElementById(tabName);
-  if (selectedTab) {
-    selectedTab.classList.add("tab-active");
-  }
-
-  // Activate selected button
-  const selectedBtn = document.querySelector(
-    `.tab-button[data-tab="${tabName}"]`
-  );
-  if (selectedBtn) {
-    selectedBtn.classList.add("tab-active");
-  }
-
-  // Update preview button text based on active tab
-  const previewBtnText = elements.previewBtn.querySelector('span');
-  if (previewBtnText) {
-    if (tabName === 'upload-tab') {
-      previewBtnText.textContent = 'Upload & Preview';
-    } else {
-      previewBtnText.textContent = 'Fetch & Preview';
-    }
-  }
+  const html = `
+    <div class="share-modal-overlay" id="shareModalOverlay">
+      <div class="share-modal">
+        <div class="share-modal-content">
+          <div class="share-spinner-large"></div>
+          <h3 class="share-modal-title">Preparing Video</h3>
+          <p class="share-modal-text" id="shareModalText">
+            ${showRenderProgress ? "Rendering with frame..." : "Opening share..."}
+          </p>
+          ${showRenderProgress ? '<div class="share-modal-progress"><div class="share-modal-progress-bar" id="shareModalProgressBar"></div></div>' : ''}
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.insertAdjacentHTML("beforeend", html);
 }
 
-/**
- * Handle file upload
- */
-function handleFileUpload(file) {
-  if (!file) return;
-
-  // Validate file type
-  if (!file.type.startsWith("video/")) {
-    showToast("Please select a valid video file", "error");
-    return;
-  }
-
-  // Validate file size (500MB)
-  const maxSize = 500 * 1024 * 1024;
-  if (file.size > maxSize) {
-    showToast("File size exceeds 500MB limit", "error");
-    return;
-  }
-
-  state.isProcessing = true;
-  setButtonLoading(elements.previewBtn, true);
-  elements.fetchProgress.style.width = "0%";
-
-  const formData = new FormData();
-  formData.append("file", file);
-
-  try {
-    // Show status bar
-    elements.fetchStatus.classList.remove("hidden");
-    elements.fetchStatusText.textContent = "Uploading video...";
-
-    // Start the upload
-    fetch(`${API_BASE}/video/upload`, {
-      method: "POST",
-      body: formData,
-    })
-      .then((response) => {
-        if (!response.ok) {
-          throw new Error(`Upload failed with status ${response.status}`);
-        }
-        return response.json();
-      })
-      .then((data) => {
-        if (!data.success) {
-          throw new Error(data.error || "Failed to upload file");
-        }
-
-        if (!data.videoId) {
-          throw new Error("No videoId returned from server");
-        }
-
-        state.videoId = data.videoId;
-        console.log("Upload successful, videoId:", state.videoId);
-        elements.fetchStatusText.textContent = "Processing uploaded video...";
-
-        // Poll for status
-        pollStatus(
-          `/video/status/${data.videoId}`,
-          elements.fetchStatus,
-          elements.fetchStatusText,
-          elements.fetchProgress,
-          // On complete
-          () => {
-            showVideoPreview();
-            showToast("Video uploaded successfully!", "success");
-            state.isProcessing = false;
-            setButtonLoading(
-              elements.previewBtn,
-              false,
-              `
-              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <polygon points="5 3 19 12 5 21 5 3"></polygon>
-              </svg>
-              <span>Fetch & Preview</span>
-            `
-            );
-          },
-          // On error
-          (err) => {
-            showToast(
-              err.message || "Failed to process uploaded video",
-              "error"
-            );
-            state.isProcessing = false;
-            setButtonLoading(
-              elements.previewBtn,
-              false,
-              `
-              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <polygon points="5 3 19 12 5 21 5 3"></polygon>
-              </svg>
-              <span>Fetch & Preview</span>
-            `
-            );
-          }
-        );
-      })
-      .catch((err) => {
-        console.error("Upload error:", err);
-        showToast(err.message || "Failed to upload file", "error");
-        state.isProcessing = false;
-        setButtonLoading(elements.previewBtn, false);
-        elements.fetchStatus.classList.add("hidden");
-      });
-  } catch (err) {
-    console.error("Upload error:", err);
-    showToast(err.message || "Failed to upload file", "error");
-    state.isProcessing = false;
-    setButtonLoading(elements.previewBtn, false);
-    elements.fetchStatus.classList.add("hidden");
-  }
+function closeShareLoadingModal() {
+  const modal = document.getElementById("shareModalOverlay");
+  if (modal) modal.remove();
 }
 
 // ===========================================
 // Event Listeners
 // ===========================================
 
-// Tab navigation
-elements.urlTab.addEventListener("click", () => switchTab("url-tab"));
-elements.uploadTab.addEventListener("click", () => switchTab("upload-tab"));
-
-// File upload - Browse button (DISABLED - maintenance)
-elements.uploadFileBtn.addEventListener("click", (e) => {
-  e.preventDefault();
-  showToast("Upload feature is currently under maintenance", "warning");
-  // elements.fileInput.click();
-});
-
-// File upload - File input change
-elements.fileInput.addEventListener("change", (e) => {
-  const file = e.target.files[0];
-  if (file) {
-    handleFileUpload(file);
-    // Reset input to allow re-selection of same file
-    e.target.value = '';
-  }
-});
-
-// Drag and drop (DISABLED - maintenance)
-elements.uploadArea.addEventListener("dragover", (e) => {
-  e.preventDefault();
-  e.stopPropagation();
-  // elements.uploadArea.classList.add("drag-over");
-  showToast("Upload feature is currently under maintenance", "warning");
-});
-
-elements.uploadArea.addEventListener("dragleave", (e) => {
-  e.preventDefault();
-  e.stopPropagation();
-  // elements.uploadArea.classList.remove("drag-over");
-});
-
-elements.uploadArea.addEventListener("drop", (e) => {
-  e.preventDefault();
-  e.stopPropagation();
-  // elements.uploadArea.classList.remove("drag-over");
-
-  // const files = e.dataTransfer.files;
-  // if (files.length > 0) {
-  //   handleFileUpload(files[0]);
-  // }
-  showToast("Upload feature is currently under maintenance", "warning");
-});
-
-// Click upload area to open file picker (only if not clicking the button)
-elements.uploadArea.addEventListener("click", (e) => {
-  // Don't trigger if clicking the browse button itself
-  if (e.target.id === "uploadFileBtn" || e.target.closest("#uploadFileBtn")) {
-    return;
-  }
-  // Only trigger on upload area background/text areas
-  if (e.target === elements.uploadArea || 
-      e.target.classList.contains('upload-text') ||
-      e.target.classList.contains('upload-subtext') ||
-      e.target.classList.contains('upload-hint') ||
-      e.target.classList.contains('upload-icon')) {
-    elements.fileInput.click();
-  }
-});
-
-// Paste/Clear button
+// Paste / Clear
 elements.actionBtn.addEventListener("click", async (e) => {
   e.preventDefault();
-
   if (elements.videoUrl.value.trim()) {
     elements.videoUrl.value = "";
-    // Reset state
     state.videoId = null;
     state.selectedFrame = "none";
+    state.bgRenderPromise = null;
     elements.previewSection.classList.add("hidden");
     elements.downloadSection.classList.add("hidden");
   } else {
     try {
       const text = await navigator.clipboard.readText();
       elements.videoUrl.value = text;
-    } catch (err) {
+    } catch (_) {
       showToast("Unable to access clipboard", "error");
     }
   }
-
   updateActionButton();
 });
 
-// URL input changes
 elements.videoUrl.addEventListener("input", updateActionButton);
 
-// Auto-fetch on paste - seamless UX
-elements.videoUrl.addEventListener("paste", (e) => {
-  // Wait for paste to complete
+// Auto-fetch on paste if valid URL
+elements.videoUrl.addEventListener("paste", () => {
   setTimeout(() => {
     const url = elements.videoUrl.value.trim();
     if (url && isValidSocialUrl(url) && !state.isProcessing) {
-      showToast("Valid URL detected, fetching...", "info");
       updateActionButton();
       fetchVideo();
     }
   }, 100);
 });
 
-// Enter key in URL input
 elements.videoUrl.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") {
-    e.preventDefault();
-    if (!state.isProcessing) {
-      fetchVideo();
-    }
-  }
+  if (e.key === "Enter") { e.preventDefault(); if (!state.isProcessing) fetchVideo(); }
 });
 
-// Preview button
 elements.previewBtn.addEventListener("click", (e) => {
   e.preventDefault();
-  if (!state.isProcessing) {
-    fetchVideo();
-  }
+  if (!state.isProcessing) fetchVideo();
 });
 
-// Download button
 elements.downloadBtn.addEventListener("click", (e) => {
   e.preventDefault();
-  if (!state.isProcessing) {
-    downloadVideo();
-  }
+  if (!state.isProcessing) downloadVideo();
 });
 
-// Frame selection (delegated)
 elements.frameOptions.addEventListener("click", (e) => {
   const option = e.target.closest(".frame-option");
-  if (option && option.dataset.frame) {
-    selectFrame(option.dataset.frame);
-  }
+  if (option && option.dataset.frame) selectFrame(option.dataset.frame);
 });
 
-// Share button
-elements.shareBtn.addEventListener("click", (e) => {
-  e.preventDefault();
-  shareVideo();
-});
-
-// WhatsApp button
-elements.whatsappBtn.addEventListener("click", (e) => {
-  e.preventDefault();
-  shareToWhatsApp();
-});
-
-// Copy link button
-elements.copyLinkBtn.addEventListener("click", (e) => {
-  e.preventDefault();
-  copyVideoLink();
-});
+elements.shareBtn.addEventListener("click", (e) => { e.preventDefault(); shareVideo(); });
+elements.whatsappBtn.addEventListener("click", (e) => { e.preventDefault(); shareToWhatsApp(); });
+elements.copyLinkBtn.addEventListener("click", (e) => { e.preventDefault(); copyVideoLink(); });
 
 // ===========================================
 // Initialize
 // ===========================================
-
 document.addEventListener("DOMContentLoaded", () => {
   updateActionButton();
-  loadFrames();
+  wakeServer().then(() => loadFrames());
 });

@@ -83,14 +83,13 @@ async function processRender(jobId, videoPath, frameId) {
     
     logger.info({ jobId, width, height, duration }, "Video dimensions determined");
 
-    // Optimize resolution for WhatsApp Status (max 1080p for better quality)
-    // Keep higher quality since WhatsApp Status supports up to 1080p
-    const maxDimension = 1080;
+    // Cap resolution at 720p for faster rendering on free-tier hosting
+    const maxDimension = 720;
     if (width > maxDimension || height > maxDimension) {
       const scale = maxDimension / Math.max(width, height);
       width = Math.round(width * scale / 2) * 2; // Ensure even dimensions
       height = Math.round(height * scale / 2) * 2;
-      logger.info({ jobId, optimizedWidth: width, optimizedHeight: height }, "Resolution optimized");
+      logger.info({ jobId, optimizedWidth: width, optimizedHeight: height }, "Resolution optimized for speed");
     }
 
     // Pre-process frame with Sharp (10x faster than FFmpeg scaling)
@@ -132,19 +131,17 @@ async function processRender(jobId, videoPath, frameId) {
             "-map", "[out]",
             "-map", "0:a?",
             "-c:v", "libx264",
-            "-preset", "fast",
-            "-crf", "23",
-            "-profile:v", "high",
-            "-level", "4.0",
+            "-preset", "ultrafast",
+            "-crf", "25",
+            "-profile:v", "baseline",
+            "-level", "3.1",
             "-pix_fmt", "yuv420p",
             "-c:a", "aac",
-            "-b:a", "128k",
+            "-b:a", "96k",
             "-ar", "44100",
             "-ac", "2",
             "-movflags", "+faststart",
             "-threads", "0",
-            "-maxrate", "5M",
-            "-bufsize", "10M",
           ])
           .output(outputPath)
           .on("start", (cmd) => {
