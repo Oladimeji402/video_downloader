@@ -2,144 +2,97 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="description" content="Add beautiful frames to TikTok, Instagram, YouTube and Twitter videos. Free online video framer." />
-  <meta name="theme-color" content="#10b981" />
+  <meta name="theme-color" content="#0d0d0f" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <link rel="manifest" href="/manifest.json" />
   <link rel="apple-touch-icon" href="/icon-192.png" />
-  <title>Video Framer — Add Frames to Social Videos</title>
+  <title>FrameIt — Frame Your Videos</title>
   <link rel="stylesheet" href="style.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;1,9..40,400&display=swap" rel="stylesheet">
   <script src="env.js"></script>
 </head>
 <body>
-  <div class="background-pattern"></div>
-  
+  <!-- Server status banner -->
+  <div id="serverBanner" class="server-banner" aria-live="polite">
+    <div class="server-banner-inner">
+      <div class="server-banner-dot"></div>
+      <span id="serverBannerText">Connecting to server...</span>
+    </div>
+  </div>
+
   <main class="app">
     <header class="header">
       <div class="logo">
-        <span class="logo-icon">◈</span>
-        <span class="logo-text">VideoFramer</span>
+        <svg class="logo-mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+          <rect x="2" y="2" width="28" height="28" rx="6" stroke="url(#logoGrad)" stroke-width="2.5"/>
+          <rect x="7" y="7" width="18" height="18" rx="3" stroke="url(#logoGrad)" stroke-width="1.5" opacity=".5"/>
+          <polygon points="13,11 22,16 13,21" fill="url(#logoGrad)"/>
+          <defs>
+            <linearGradient id="logoGrad" x1="0" y1="0" x2="32" y2="32">
+              <stop offset="0%" stop-color="#f59e0b"/>
+              <stop offset="100%" stop-color="#ef4444"/>
+            </linearGradient>
+          </defs>
+        </svg>
+        <span class="logo-text">FrameIt</span>
       </div>
-      <p class="tagline">Add beautiful frames to TikTok & Instagram videos</p>
+      <p class="tagline">Drop a link. Pick a frame. Share.</p>
     </header>
 
-    <section class="card input-section">
-      <h2 class="section-title">
-        <span class="step-badge">1</span>
-        Add Your Video
-      </h2>
-      
-      <!-- Tab Navigation -->
-      <div class="tab-navigation" role="tablist" aria-label="Video input methods">
-        <button id="urlTab" class="tab-button tab-active" data-tab="url-tab" role="tab" aria-selected="true" aria-controls="url-tab">
-          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
-            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+    <!-- Step 1: Input -->
+    <section class="card input-section" id="inputSection">
+      <div class="input-row">
+        <label for="videoUrl" class="sr-only">Video URL</label>
+        <input
+          id="videoUrl"
+          type="url"
+          placeholder="Paste TikTok, IG, or YouTube link..."
+          autocomplete="off"
+          spellcheck="false"
+          aria-label="Paste a TikTok, Instagram, YouTube, or Twitter video URL"
+        />
+        <button id="actionBtn" class="input-action-btn" type="button" aria-label="Paste URL from clipboard" title="Paste">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
           </svg>
-          <span>URL</span>
-        </button>
-        <button id="uploadTab" class="tab-button" data-tab="upload-tab" role="tab" aria-selected="false" aria-controls="upload-tab" disabled>
-          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-            <polyline points="17 8 12 3 7 8"></polyline>
-            <line x1="12" y1="3" x2="12" y2="15"></line>
-          </svg>
-          <span>Upload</span>
-          <span class="badge-maintenance">Maintenance</span>
         </button>
       </div>
 
-      <!-- URL Tab Content -->
-      <div id="url-tab" class="tab-content tab-active" role="tabpanel" aria-labelledby="urlTab">
-        <div class="input-group">
-          <label for="videoUrl" class="sr-only">Video URL</label>
-          <input
-            id="videoUrl"
-            type="url"
-            placeholder="https://www.tiktok.com/... or https://www.instagram.com/..."
-            autocomplete="off"
-            spellcheck="false"
-            aria-label="Paste a TikTok, Instagram, YouTube, or Twitter video URL"
-          />
-          <button id="actionBtn" class="btn btn-secondary btn-icon" type="button" aria-label="Paste URL from clipboard">
-            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-            </svg>
-          </button>
-        </div>
-      </div>
-
-      <!-- Upload Tab Content -->
-      <div id="upload-tab" class="tab-content">
-        <div class="maintenance-banner" style="background: #fff3cd; border: 1px solid #ffc107; border-radius: 8px; padding: 16px; margin-bottom: 16px; text-align: center;">
-          <p style="margin: 0; color: #856404; font-weight: 500;">🔧 Upload feature is currently under maintenance</p>
-        </div>
-        <div class="upload-area" id="uploadArea" style="opacity: 0.5; pointer-events: none;">
-          <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-            <polyline points="17 8 12 3 7 8"></polyline>
-            <line x1="12" y1="3" x2="12" y2="15"></line>
-          </svg>
-          <p class="upload-text">Drag and drop your video here</p>
-          <p class="upload-subtext">or</p>
-          <button id="uploadFileBtn" class="btn btn-secondary btn-small" type="button">
-            Browse Files
-          </button>
-          <p class="upload-hint">Supports MP4, MOV, AVI, WebM (max 500MB)</p>
-          <input
-            id="fileInput"
-            type="file"
-            accept="video/*,video/mp4,video/quicktime,video/x-msvideo,video/webm"
-            style="display: none"
-          />
-        </div>
-      </div>
-
-      <!-- Preview Button -->
-      <button id="previewBtn" class="btn btn-primary btn-full" type="button">
-        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <polygon points="5 3 19 12 5 21 5 3"></polygon>
+      <button id="previewBtn" class="btn-go" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <line x1="5" y1="12" x2="19" y2="12"></line>
+          <polyline points="12 5 19 12 12 19"></polyline>
         </svg>
-        <span>Fetch & Preview</span>
+        <span>Go</span>
       </button>
 
-      <!-- Status indicator -->
-      <div id="fetchStatus" class="status-bar hidden">
-        <div class="status-content">
-          <div class="spinner"></div>
-          <span id="fetchStatusText">Fetching video...</span>
+      <!-- Fetch progress -->
+      <div id="fetchStatus" class="progress-strip hidden">
+        <div class="progress-strip-bar">
+          <div id="fetchProgress" class="progress-strip-fill"></div>
         </div>
-        <div class="progress-bar">
-          <div id="fetchProgress" class="progress-fill"></div>
-        </div>
+        <span id="fetchStatusText" class="progress-strip-text">Fetching video...</span>
       </div>
     </section>
 
-    <!-- Preview Section (hidden by default) -->
+    <!-- Step 2: Preview + Frames (hidden by default) -->
     <section id="previewSection" class="card preview-section hidden">
-      <h2 class="section-title">
-        <span class="step-badge">2</span>
-        Preview & Select Frame
-      </h2>
-
       <div class="preview-container">
         <div id="framePreview" class="frame-preview">
           <video id="videoPlayer" controls playsinline webkit-playsinline preload="metadata"></video>
           <div id="frameOverlay" class="frame-overlay"></div>
         </div>
-        <p class="preview-hint">👆 Click frames below to see live preview</p>
       </div>
 
       <div class="frame-selector">
-        <h3 class="subsection-title">Choose a Frame</h3>
+        <p class="frame-selector-label">Frames</p>
         <div id="frameOptions" class="frame-options">
-          <!-- Frame options will be populated dynamically -->
           <button class="frame-option selected" data-frame="none">
             <div class="frame-thumb no-frame">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -147,80 +100,63 @@
                 <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"></line>
               </svg>
             </div>
-            <span>No Frame</span>
+            <span>None</span>
           </button>
         </div>
         <p id="noFramesMsg" class="no-frames-msg hidden">
-          No frame templates found. Add PNG frames to the <code>backend/frames</code> folder.
+          No frames available.
         </p>
       </div>
     </section>
 
-    <!-- Download Section (hidden by default) -->
-    <section id="downloadSection" class="card download-section hidden" aria-label="Share and download options">
-      <h2 class="section-title">
-        <span class="step-badge" aria-hidden="true">3</span>
-        Share or Download
-      </h2>
-
-      <!-- Share options -->
-      <div class="share-section">
-        <p class="share-label">Share directly to WhatsApp Status:</p>
-        <div class="share-buttons">
-          <button id="whatsappBtn" class="btn btn-whatsapp btn-full" type="button" aria-label="Share video to WhatsApp">
-            <svg class="icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-              <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z"/>
-            </svg>
-            <span>Share to WhatsApp</span>
-          </button>
-        </div>
-        
-        <div class="share-buttons-secondary">
-          <button id="shareBtn" class="btn btn-secondary" type="button" aria-label="Share video using device share menu">
-            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-              <circle cx="18" cy="5" r="3"></circle>
-              <circle cx="6" cy="12" r="3"></circle>
-              <circle cx="18" cy="19" r="3"></circle>
-              <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
-              <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
-            </svg>
-            <span>More</span>
-          </button>
-          <button id="copyLinkBtn" class="btn btn-secondary" type="button" aria-label="Copy shareable link to clipboard">
-            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
-              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
-            </svg>
-            <span>Copy Link</span>
-          </button>
-        </div>
-      </div>
-
-      <p class="download-divider">or save to device</p>
-
-      <button id="downloadBtn" class="btn btn-accent btn-full" type="button" aria-label="Download framed video to your device">
-        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-          <polyline points="7 10 12 15 17 10"></polyline>
-          <line x1="12" y1="15" x2="12" y2="3"></line>
+    <!-- Step 3: Actions (hidden by default) -->
+    <section id="downloadSection" class="card action-section hidden" aria-label="Share and download options">
+      <button id="whatsappBtn" class="btn-whatsapp" type="button" aria-label="Share video to WhatsApp">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z"/>
         </svg>
-        <span>Download Video</span>
+        <span>Share to WhatsApp</span>
       </button>
 
-      <!-- Render status -->
-      <div id="renderStatus" class="status-bar hidden" role="status" aria-live="polite">
-        <div class="status-content">
-          <div class="spinner" aria-hidden="true"></div>
-          <span id="renderStatusText">Rendering video...</span>
+      <div class="action-row">
+        <button id="downloadBtn" class="btn-action" type="button" aria-label="Download video">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+          <span>Download</span>
+        </button>
+        <button id="shareBtn" class="btn-action" type="button" aria-label="Share video">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="18" cy="5" r="3"></circle>
+            <circle cx="6" cy="12" r="3"></circle>
+            <circle cx="18" cy="19" r="3"></circle>
+            <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
+            <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
+          </svg>
+          <span>Share</span>
+        </button>
+        <button id="copyLinkBtn" class="btn-action" type="button" aria-label="Copy link">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+          </svg>
+          <span>Copy Link</span>
+        </button>
+      </div>
+
+      <!-- Render progress -->
+      <div id="renderStatus" class="progress-strip hidden" role="status" aria-live="polite">
+        <div class="progress-strip-bar">
+          <div id="renderProgress" class="progress-strip-fill"></div>
         </div>
-        <div class="progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100">
-          <div id="renderProgress" class="progress-fill"></div>
-        </div>
+        <span id="renderStatusText" class="progress-strip-text">Rendering...</span>
       </div>
     </section>
 
     <footer class="footer">
-      <p>Built with ❤️ using Node.js + FFmpeg</p>
+      <p>Paste any TikTok, Instagram, YouTube, or X link</p>
     </footer>
   </main>
 

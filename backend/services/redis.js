@@ -11,12 +11,13 @@ export async function initRedis() {
     client = new Redis(redisUrl, {
       maxRetriesPerRequest: null,
       enableReadyCheck: false,
+      connectTimeout: 2000,
       retryStrategy: (times) => {
-        if (times > 3) {
-          logger.warn("Redis connection failed after 3 attempts. Running without Redis.");
-          return null; // Stop retrying
+        if (times > 1) {
+          logger.info("Redis unavailable — using in-memory mode (fine for small user count)");
+          return null;
         }
-        return Math.min(times * 200, 1000);
+        return 500;
       },
     });
 
@@ -35,7 +36,7 @@ export async function initRedis() {
     // Wait for connection with timeout
     await Promise.race([
       new Promise((resolve) => client.once("ready", resolve)),
-      new Promise((_, reject) => setTimeout(() => reject(new Error("Redis connection timeout")), 3000))
+      new Promise((_, reject) => setTimeout(() => reject(new Error("Redis connection timeout")), 1500))
     ]);
 
     isConnected = true;
