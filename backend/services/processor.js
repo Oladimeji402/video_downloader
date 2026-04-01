@@ -136,10 +136,7 @@ async function processRender(jobId, videoPath, frameId) {
             "-profile:v", "baseline",
             "-level", "3.1",
             "-pix_fmt", "yuv420p",
-            "-c:a", "aac",
-            "-b:a", "96k",
-            "-ar", "44100",
-            "-ac", "2",
+            "-c:a", "copy",
             "-movflags", "+faststart",
             "-threads", "0",
           ])
