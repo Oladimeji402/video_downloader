@@ -832,5 +832,11 @@ elements.copyLinkBtn.addEventListener("click", (e) => { e.preventDefault(); copy
 // ===========================================
 document.addEventListener("DOMContentLoaded", () => {
   updateActionButton();
-  wakeServer().then(() => loadFrames());
+  wakeServer().then(() => {
+    loadFrames();
+    // Ping server every 14 min to prevent Render free-tier cold starts
+    setInterval(() => {
+      fetch(`${API_BASE}/health`).catch(() => {});
+    }, 14 * 60 * 1000);
+  });
 });
