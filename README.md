@@ -2,15 +2,16 @@
 
 Add beautiful frames to TikTok, Instagram, and other social media videos.
 
-![VideoFramer Preview](https://via.placeholder.com/800x400?text=VideoFramer+Preview)
-
 ## Features
 
 - 📥 **Fetch videos** from TikTok, Instagram, YouTube, Twitter, and Facebook
+- 📤 **Upload videos** directly (max 500MB)
 - 🖼️ **Frame overlays** - Add custom PNG frame templates on top of videos
 - 🎨 **Frame selection** - Choose from multiple frame styles
-- ⚡ **FFmpeg processing** - Server-side video rendering for reliability
+- ⚡ **FFmpeg processing** - Server-side video rendering with Sharp preprocessing
 - 📊 **Progress tracking** - Real-time download and render progress
+- 🚀 **Background pre-rendering** - Instant downloads with smart caching
+- 📱 **Share options** - Native share, WhatsApp, copy link
 - 💾 **Easy download** - Get your framed video as a single merged file
 
 ## Prerequisites
@@ -155,6 +156,26 @@ GET /api/video/download/:jobId → User downloads merged video
 |----------|---------|-------------|
 | `PORT` | `4000` | Server port |
 
+## Performance
+
+### Optimizations
+- **Resolution capping** - Videos scaled to 720p for faster processing
+- **Sharp preprocessing** - Frame images processed 10x faster than FFmpeg alone
+- **Background pre-rendering** - Renders start when frame is selected
+- **In-memory fallback** - Works without Redis for simple deployments
+- **Automatic cleanup** - Files deleted after 30 minutes
+
+### Known Issues
+- **Long videos (>2min)** may take 3-4 minutes to render
+- **TikTok videos** may be slower due to download time
+- **Cold starts** on free hosting can take 30-60 seconds
+
+### Improving Performance
+1. Enable Redis for better queue management
+2. Reduce resolution cap in `backend/services/processor.js`
+3. Use faster hosting with more CPU/RAM
+4. Limit video duration on upload
+
 ## Troubleshooting
 
 ### "yt-dlp not found"
@@ -172,10 +193,22 @@ pip install -U yt-dlp
 ### Frame not showing in preview
 Ensure your frame PNG has a transparent center and is named correctly.
 
+### Rendering takes too long
+- Check video duration (longer videos = longer render time)
+- Verify FFmpeg is using hardware acceleration if available
+- Check server CPU usage
+- Consider reducing resolution cap
+
+## Documentation
+
+- **Backend** - See `backend/README.md` for API details
+- **Frontend** - See `frontend/README.md` for UI details
+- **Deployment** - See `DEPLOYMENT.md` for hosting instructions
+
 ## License
 
 MIT License - feel free to use and modify!
 
 ---
 
-Built with ❤️ using Node.js, Express, FFmpeg, and yt-dlp
+Built with ❤️ using Node.js, Express, FFmpeg, Sharp, and yt-dlp

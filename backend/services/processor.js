@@ -84,12 +84,20 @@ async function processRender(jobId, videoPath, frameId) {
     logger.info({ jobId, width, height, duration }, "Video dimensions determined");
 
     // Cap resolution at 720p for faster rendering on free-tier hosting
+    // TikTok videos are typically 1080x1920 (9:16), this reduces to 405x720
     const maxDimension = 720;
     if (width > maxDimension || height > maxDimension) {
       const scale = maxDimension / Math.max(width, height);
       width = Math.round(width * scale / 2) * 2; // Ensure even dimensions
       height = Math.round(height * scale / 2) * 2;
       logger.info({ jobId, optimizedWidth: width, optimizedHeight: height }, "Resolution optimized for speed");
+    }
+
+    // Limit video duration for performance (max 3 minutes)
+    const maxDuration = 180; // 3 minutes
+    if (duration > maxDuration) {
+      logger.warn({ jobId, duration, maxDuration }, "Video exceeds maximum duration");
+      throw new Error(`Video is too long (${Math.round(duration)}s). Maximum duration is ${maxDuration}s (3 minutes).`);
     }
 
     // Pre-process frame with Sharp (10x faster than FFmpeg scaling)
@@ -131,14 +139,15 @@ async function processRender(jobId, videoPath, frameId) {
             "-map", "[out]",
             "-map", "0:a?",
             "-c:v", "libx264",
-            "-preset", "ultrafast",
-            "-crf", "25",
-            "-profile:v", "baseline",
-            "-level", "3.1",
+            "-preset", "veryfast",  // Changed from ultrafast for better compression
+            "-crf", "23",           // Changed from 25 for better quality
+            "-profile:v", "main",   // Changed from baseline for better compression
+            "-level", "4.0",        // Changed from 3.1 for better compatibility
             "-pix_fmt", "yuv420p",
-            "-c:a", "copy",
+            "-c:a", "aac",          // Changed from copy to ensure compatibility
+            "-b:a", "128k",         // Audio bitrate
             "-movflags", "+faststart",
-            "-threads", "0",
+            "-threads", "0",        // Use all available threads
           ])
           .output(outputPath)
           .on("start", (cmd) => {

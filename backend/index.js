@@ -125,7 +125,10 @@ app.get("/api/health", (req, res) => {
   res.json({ 
     status: "ok", 
     message: "Video Framer API is running",
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    memory: process.memoryUsage(),
+    platform: "render-free-tier"
   });
 });
 

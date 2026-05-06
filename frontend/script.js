@@ -388,7 +388,16 @@ async function renderVideoWithFrame(progressCallback) {
 
   if (!res.ok) {
     const err = await res.json();
-    throw new Error(err.error || "Rendering failed");
+    // Better error messages
+    let errorMsg = err.error || "Rendering failed";
+    if (errorMsg.includes("too long") || errorMsg.includes("Maximum duration")) {
+      errorMsg = "Video is too long. Maximum 3 minutes allowed.";
+    } else if (errorMsg.includes("not found")) {
+      errorMsg = "Video file not found. Please try fetching again.";
+    } else if (errorMsg.includes("Frame") && errorMsg.includes("not found")) {
+      errorMsg = "Frame template not found. Please select another frame.";
+    }
+    throw new Error(errorMsg);
   }
 
   const { jobId } = await res.json();
@@ -408,7 +417,11 @@ async function renderVideoWithFrame(progressCallback) {
       return blob;
     }
     if (status.status === "failed") {
-      throw new Error(status.error || "Rendering failed");
+      let errorMsg = status.error || "Rendering failed";
+      if (errorMsg.includes("too long") || errorMsg.includes("Maximum duration")) {
+        errorMsg = "Video is too long. Maximum 3 minutes allowed.";
+      }
+      throw new Error(errorMsg);
     }
     if (progressCallback && status.progress) {
       progressCallback(status.progress);
@@ -469,7 +482,18 @@ async function fetchVideo() {
     });
 
     const data = await res.json();
-    if (!data.success) throw new Error(data.error || "Failed to start download");
+    
+    if (!data.success) {
+      // Better error messages
+      let errorMsg = data.error || "Failed to start download";
+      if (errorMsg.includes("Unsupported URL")) {
+        errorMsg = "Please use a TikTok, Instagram, YouTube, Twitter, or Facebook link";
+      } else if (errorMsg.includes("Rate limit")) {
+        errorMsg = data.error; // Keep the detailed rate limit message
+      }
+      throw new Error(errorMsg);
+    }
+    
     if (!data.videoId) throw new Error("No videoId returned");
 
     state.videoId = data.videoId;
@@ -487,7 +511,17 @@ async function fetchVideo() {
         setGoLoading(false);
       },
       (err) => {
-        showToast(err.message || "Failed to download video", "error");
+        // Better error messages for download failures
+        let errorMsg = err.message || "Failed to download video";
+        if (errorMsg.includes("timeout")) {
+          errorMsg = "Download timed out. The video might be too large or unavailable.";
+        } else if (errorMsg.includes("private")) {
+          errorMsg = "This video is private or unavailable.";
+        } else if (errorMsg.includes("not found")) {
+          errorMsg = "Video not found. The link might be broken.";
+        }
+        
+        showToast(errorMsg, "error");
         state.isProcessing = false;
         setGoLoading(false);
       }
@@ -558,10 +592,25 @@ async function downloadVideo() {
   btn.disabled = true;
   btn.querySelector("span").textContent = "Rendering...";
 
+  // Show render progress
+  elements.renderStatus.classList.remove("hidden");
+  elements.renderStatusText.textContent = "Rendering with frame...";
+  elements.renderProgress.style.width = "0%";
+
   try {
     const blob = await renderVideoWithFrame((progress) => {
+      elements.renderProgress.style.width = `${progress}%`;
+      elements.renderStatusText.textContent = `Rendering... ${progress}%`;
       btn.querySelector("span").textContent = `Rendering ${progress}%`;
     });
+
+    // Hide render progress
+    elements.renderStatus.classList.add("hidden");
+
+    // Show download progress
+    elements.renderStatusText.textContent = "Preparing download...";
+    elements.renderStatus.classList.remove("hidden");
+    elements.renderProgress.style.width = "100%";
 
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -571,9 +620,29 @@ async function downloadVideo() {
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
+    
     showToast("Download started!", "success");
+    
+    // Hide progress after short delay
+    setTimeout(() => {
+      elements.renderStatus.classList.add("hidden");
+    }, 1000);
   } catch (err) {
-    showToast(err.message || "Failed to render video", "error");
+    elements.renderStatus.classList.add("hidden");
+    
+    // Better error messages
+    let errorMsg = "Failed to render video";
+    if (err.message.includes("too long")) {
+      errorMsg = "Video is too long. Maximum 3 minutes allowed.";
+    } else if (err.message.includes("timeout")) {
+      errorMsg = "Rendering timed out. Try a shorter video.";
+    } else if (err.message.includes("not found")) {
+      errorMsg = "Video file not found. Please try again.";
+    } else if (err.message) {
+      errorMsg = err.message;
+    }
+    
+    showToast(errorMsg, "error");
   } finally {
     state.isProcessing = false;
     btn.disabled = false;
@@ -586,10 +655,38 @@ async function downloadOriginalVideo() {
   btn.disabled = true;
   btn.querySelector("span").textContent = "Downloading...";
 
+  // Show download progress
+  elements.renderStatus.classList.remove("hidden");
+  elements.renderStatusText.textContent = "Downloading video...";
+  elements.renderProgress.style.width = "0%";
+
   try {
     const res = await fetch(`${API_BASE}/video/preview/${state.videoId}`);
     if (!res.ok) throw new Error("Failed to download video");
-    const blob = await res.blob();
+    
+    const contentLength = res.headers.get('content-length');
+    const total = parseInt(contentLength, 10);
+    let loaded = 0;
+
+    const reader = res.body.getReader();
+    const chunks = [];
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      
+      chunks.push(value);
+      loaded += value.length;
+      
+      if (total) {
+        const progress = Math.round((loaded / total) * 100);
+        elements.renderProgress.style.width = `${progress}%`;
+        elements.renderStatusText.textContent = `Downloading... ${progress}%`;
+        btn.querySelector("span").textContent = `${progress}%`;
+      }
+    }
+
+    const blob = new Blob(chunks, { type: 'video/mp4' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -598,8 +695,15 @@ async function downloadOriginalVideo() {
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
+    
     showToast("Download started!", "success");
+    
+    // Hide progress after short delay
+    setTimeout(() => {
+      elements.renderStatus.classList.add("hidden");
+    }, 1000);
   } catch (err) {
+    elements.renderStatus.classList.add("hidden");
     showToast("Failed to download video", "error");
   } finally {
     btn.disabled = false;
@@ -664,7 +768,16 @@ async function shareToWhatsApp() {
         videoUrl = state.lastRenderedUrl;
       } catch (renderErr) {
         closeShareLoadingModal();
-        showToast(renderErr.message || "Failed to render video", "error");
+        
+        // Better error messages
+        let errorMsg = "Failed to render video";
+        if (renderErr.message.includes("too long")) {
+          errorMsg = "Video is too long. Maximum 3 minutes allowed.";
+        } else if (renderErr.message) {
+          errorMsg = renderErr.message;
+        }
+        
+        showToast(errorMsg, "error");
         return;
       }
     } else {
@@ -701,7 +814,15 @@ async function shareToWhatsApp() {
     showToast("Opening WhatsApp...", "success");
   } catch (err) {
     closeShareLoadingModal();
-    showToast(err.message || "Failed to share to WhatsApp", "error");
+    
+    let errorMsg = "Failed to share to WhatsApp";
+    if (err.message.includes("too long")) {
+      errorMsg = "Video is too long. Maximum 3 minutes allowed.";
+    } else if (err.message) {
+      errorMsg = err.message;
+    }
+    
+    showToast(errorMsg, "error");
   }
 }
 
