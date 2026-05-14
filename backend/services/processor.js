@@ -83,14 +83,14 @@ async function processRender(jobId, videoPath, frameId) {
     
     logger.info({ jobId, width, height, duration }, "Video dimensions determined");
 
-    // Cap resolution at 540p for MAXIMUM speed on free-tier hosting
-    // Lower resolution = much faster encoding
-    const maxDimension = 540;
+    // Cap resolution at 360p for LOW MEMORY usage on free-tier hosting (512MB RAM)
+    // Lower resolution = less memory usage and faster encoding
+    const maxDimension = 360;
     if (width > maxDimension || height > maxDimension) {
       const scale = maxDimension / Math.max(width, height);
       width = Math.round(width * scale / 2) * 2; // Ensure even dimensions
       height = Math.round(height * scale / 2) * 2;
-      logger.info({ jobId, optimizedWidth: width, optimizedHeight: height }, "Resolution optimized for maximum speed");
+      logger.info({ jobId, optimizedWidth: width, optimizedHeight: height }, "Resolution optimized for low memory usage");
     }
 
     // No duration limit - removed per user request
@@ -125,14 +125,16 @@ async function processRender(jobId, videoPath, frameId) {
             "-map", "0:a?",
             "-c:v", "libx264",
             "-preset", "ultrafast",  // Fastest encoding
-            "-crf", "30",            // Higher CRF = much faster encoding, smaller files
+            "-crf", "32",            // Higher CRF = faster encoding, smaller files, less memory
             "-profile:v", "baseline", // Simplest profile for speed
             "-level", "3.0",
             "-pix_fmt", "yuv420p",
             "-c:a", "copy",          // Copy audio (no re-encoding)
             "-movflags", "+faststart",
-            "-threads", "0",         // Use all CPU threads
+            "-threads", "2",         // Limit threads to reduce memory usage (was 0 = all threads)
             "-tune", "fastdecode",   // Optimize for fast decoding
+            "-bufsize", "512k",      // Limit buffer size to reduce memory usage
+            "-maxrate", "1M",        // Limit bitrate to reduce memory usage
           ])
           .output(outputPath)
           .on("start", (cmd) => {

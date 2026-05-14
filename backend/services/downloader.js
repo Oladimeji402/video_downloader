@@ -76,7 +76,8 @@ async function processDownload(videoId, url) {
           "--newline",
           "--progress",
           "--no-playlist",           // Don't download playlists
-          "--max-filesize", "500M",  // Limit file size
+          "--max-filesize", "200M",  // Reduced from 500M to limit memory usage
+          "--buffer-size", "16K",    // Smaller buffer to reduce memory usage
           url
         ]);
 

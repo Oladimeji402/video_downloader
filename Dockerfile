@@ -39,6 +39,7 @@ EXPOSE 8080
 # Set environment variables
 ENV PORT=8080
 ENV NODE_ENV=production
+ENV NODE_OPTIONS="--max-old-space-size=450"
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
