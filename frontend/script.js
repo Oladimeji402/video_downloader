@@ -585,27 +585,18 @@ async function downloadVideo() {
   state.isProcessing = true;
   const btn = elements.downloadBtn;
   btn.disabled = true;
-  btn.querySelector("span").textContent = "Rendering...";
-
-  // Show render progress
-  elements.renderStatus.classList.remove("hidden");
-  elements.renderStatusText.textContent = "Rendering with frame...";
-  elements.renderProgress.style.width = "0%";
 
   try {
+    // Show download modal with render progress
+    showDownloadModal(true);
+    updateDownloadModalProgress(0, "Rendering with frame...");
+
     const blob = await renderVideoWithFrame((progress) => {
-      elements.renderProgress.style.width = `${progress}%`;
-      elements.renderStatusText.textContent = `Rendering... ${progress}%`;
-      btn.querySelector("span").textContent = `Rendering ${progress}%`;
+      updateDownloadModalProgress(progress, `Rendering... ${progress}%`);
     });
 
-    // Hide render progress
-    elements.renderStatus.classList.add("hidden");
-
-    // Show download progress
-    elements.renderStatusText.textContent = "Preparing download...";
-    elements.renderStatus.classList.remove("hidden");
-    elements.renderProgress.style.width = "100%";
+    // Update modal for download preparation
+    updateDownloadModalProgress(100, "Preparing download...");
 
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -616,20 +607,18 @@ async function downloadVideo() {
     a.remove();
     URL.revokeObjectURL(url);
     
-    showToast("Download started!", "success");
-    
-    // Hide progress after short delay
+    // Show success in modal briefly before closing
+    updateDownloadModalProgress(100, "Download started!");
     setTimeout(() => {
-      elements.renderStatus.classList.add("hidden");
-    }, 1000);
+      closeDownloadModal();
+      showToast("Download complete!", "success");
+    }, 800);
   } catch (err) {
-    elements.renderStatus.classList.add("hidden");
+    closeDownloadModal();
     
     // Better error messages
     let errorMsg = "Failed to render video";
-    if (err.message.includes("too long")) {
-      errorMsg = "Video is too long. Maximum 3 minutes allowed.";
-    } else if (err.message.includes("timeout")) {
+    if (err.message.includes("timeout")) {
       errorMsg = "Rendering timed out. Try a shorter video.";
     } else if (err.message.includes("not found")) {
       errorMsg = "Video file not found. Please try again.";
@@ -641,21 +630,18 @@ async function downloadVideo() {
   } finally {
     state.isProcessing = false;
     btn.disabled = false;
-    btn.querySelector("span").textContent = "Download";
   }
 }
 
 async function downloadOriginalVideo() {
   const btn = elements.downloadBtn;
   btn.disabled = true;
-  btn.querySelector("span").textContent = "Downloading...";
-
-  // Show download progress
-  elements.renderStatus.classList.remove("hidden");
-  elements.renderStatusText.textContent = "Downloading video...";
-  elements.renderProgress.style.width = "0%";
 
   try {
+    // Show download modal
+    showDownloadModal(false);
+    updateDownloadModalProgress(0, "Downloading video...");
+
     const res = await fetch(`${API_BASE}/video/preview/${state.videoId}`);
     if (!res.ok) throw new Error("Failed to download video");
     
@@ -675,9 +661,7 @@ async function downloadOriginalVideo() {
       
       if (total) {
         const progress = Math.round((loaded / total) * 100);
-        elements.renderProgress.style.width = `${progress}%`;
-        elements.renderStatusText.textContent = `Downloading... ${progress}%`;
-        btn.querySelector("span").textContent = `${progress}%`;
+        updateDownloadModalProgress(progress, `Downloading... ${progress}%`);
       }
     }
 
@@ -691,18 +675,27 @@ async function downloadOriginalVideo() {
     a.remove();
     URL.revokeObjectURL(url);
     
-    showToast("Download started!", "success");
-    
-    // Hide progress after short delay
+    // Show success in modal briefly before closing
+    updateDownloadModalProgress(100, "Download started!");
     setTimeout(() => {
-      elements.renderStatus.classList.add("hidden");
-    }, 1000);
+      closeDownloadModal();
+      showToast("Download complete!", "success");
+    }, 800);
   } catch (err) {
-    elements.renderStatus.classList.add("hidden");
-    showToast("Failed to download video", "error");
+    closeDownloadModal();
+    
+    let errorMsg = "Failed to download video";
+    if (err.message.includes("timeout")) {
+      errorMsg = "Download timed out. The video might be too large.";
+    } else if (err.message.includes("not found")) {
+      errorMsg = "Video not found. Please try again.";
+    } else if (err.message) {
+      errorMsg = err.message;
+    }
+    
+    showToast(errorMsg, "error");
   } finally {
     btn.disabled = false;
-    btn.querySelector("span").textContent = "Download";
   }
 }
 
@@ -879,6 +872,43 @@ function showShareLoadingModal(showRenderProgress = false) {
 
 function closeShareLoadingModal() {
   const modal = document.getElementById("shareModalOverlay");
+  if (modal) modal.remove();
+}
+
+// ===========================================
+// Download Modal
+// ===========================================
+function showDownloadModal(showProgress = false) {
+  const existing = document.getElementById("downloadModalOverlay");
+  if (existing) existing.remove();
+
+  const html = `
+    <div class="share-modal-overlay" id="downloadModalOverlay">
+      <div class="share-modal">
+        <div class="share-modal-content">
+          <div class="share-spinner-large"></div>
+          <h3 class="share-modal-title">Downloading Video</h3>
+          <p class="share-modal-text" id="downloadModalText">
+            ${showProgress ? "Rendering with frame..." : "Preparing download..."}
+          </p>
+          ${showProgress ? '<div class="share-modal-progress"><div class="share-modal-progress-bar" id="downloadModalProgressBar"></div></div>' : '<div class="share-modal-progress"><div class="share-modal-progress-bar" id="downloadModalProgressBar"></div></div>'}
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.insertAdjacentHTML("beforeend", html);
+}
+
+function updateDownloadModalProgress(progress, text) {
+  const textEl = document.getElementById("downloadModalText");
+  const progressBar = document.getElementById("downloadModalProgressBar");
+  
+  if (textEl) textEl.textContent = text;
+  if (progressBar) progressBar.style.width = `${progress}%`;
+}
+
+function closeDownloadModal() {
+  const modal = document.getElementById("downloadModalOverlay");
   if (modal) modal.remove();
 }
 
