@@ -390,9 +390,7 @@ async function renderVideoWithFrame(progressCallback) {
     const err = await res.json();
     // Better error messages
     let errorMsg = err.error || "Rendering failed";
-    if (errorMsg.includes("too long") || errorMsg.includes("Maximum duration")) {
-      errorMsg = "Video is too long. Maximum 3 minutes allowed.";
-    } else if (errorMsg.includes("not found")) {
+    if (errorMsg.includes("not found")) {
       errorMsg = "Video file not found. Please try fetching again.";
     } else if (errorMsg.includes("Frame") && errorMsg.includes("not found")) {
       errorMsg = "Frame template not found. Please select another frame.";
@@ -418,9 +416,6 @@ async function renderVideoWithFrame(progressCallback) {
     }
     if (status.status === "failed") {
       let errorMsg = status.error || "Rendering failed";
-      if (errorMsg.includes("too long") || errorMsg.includes("Maximum duration")) {
-        errorMsg = "Video is too long. Maximum 3 minutes allowed.";
-      }
       throw new Error(errorMsg);
     }
     if (progressCallback && status.progress) {

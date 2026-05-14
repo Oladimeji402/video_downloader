@@ -83,37 +83,22 @@ async function processRender(jobId, videoPath, frameId) {
     
     logger.info({ jobId, width, height, duration }, "Video dimensions determined");
 
-    // Cap resolution at 720p for faster rendering on free-tier hosting
-    // TikTok videos are typically 1080x1920 (9:16), this reduces to 405x720
-    const maxDimension = 720;
+    // Cap resolution at 540p for MAXIMUM speed on free-tier hosting
+    // Lower resolution = much faster encoding
+    const maxDimension = 540;
     if (width > maxDimension || height > maxDimension) {
       const scale = maxDimension / Math.max(width, height);
       width = Math.round(width * scale / 2) * 2; // Ensure even dimensions
       height = Math.round(height * scale / 2) * 2;
-      logger.info({ jobId, optimizedWidth: width, optimizedHeight: height }, "Resolution optimized for speed");
+      logger.info({ jobId, optimizedWidth: width, optimizedHeight: height }, "Resolution optimized for maximum speed");
     }
 
-    // Limit video duration for performance (max 3 minutes)
-    const maxDuration = 180; // 3 minutes
-    if (duration > maxDuration) {
-      logger.warn({ jobId, duration, maxDuration }, "Video exceeds maximum duration");
-      throw new Error(`Video is too long (${Math.round(duration)}s). Maximum duration is ${maxDuration}s (3 minutes).`);
-    }
+    // No duration limit - removed per user request
+    logger.info({ jobId, duration }, "Processing video (no duration limit)");
 
-    // Pre-process frame with Sharp (10x faster than FFmpeg scaling)
-    logger.info({ jobId }, "Processing frame with Sharp");
-    const overlayPath = path.join(RENDERED_DIR, `overlay-${jobId}.png`);
-    
-    await sharp(framePath)
-      .resize(width, height, {
-        fit: "cover",
-        withoutEnlargement: true,
-      })
-      .ensureAlpha() // Ensure RGBA format
-      .png()
-      .toFile(overlayPath);
-    
-    logger.info({ jobId, overlayPath }, "Frame processed and saved");
+    // Skip Sharp preprocessing for maximum speed - resize frame with FFmpeg instead
+    logger.info({ jobId }, "Using direct FFmpeg processing (no Sharp preprocessing)");
+    const overlayPath = framePath; // Use frame directly
 
     // Render with FFmpeg - optimized for FAST sharing (smaller files)
     logger.info({ jobId, outputPath }, "Starting FFmpeg encoding");
@@ -130,24 +115,24 @@ async function processRender(jobId, videoPath, frameId) {
 
         ffmpegCmd
           .complexFilter([
-            // Scale video to target resolution with good quality
-            `[0:v]scale=${width}:${height}:flags=lanczos[scaled]`,
-            "[1:v]format=rgba[frame]",
+            // Scale both video and frame, then overlay - all in one pass for speed
+            `[0:v]scale=${width}:${height}:flags=fast_bilinear[scaled]`,
+            `[1:v]scale=${width}:${height}:flags=fast_bilinear,format=rgba[frame]`,
             "[scaled][frame]overlay=0:0[out]",
           ])
           .outputOptions([
             "-map", "[out]",
             "-map", "0:a?",
             "-c:v", "libx264",
-            "-preset", "veryfast",  // Changed from ultrafast for better compression
-            "-crf", "23",           // Changed from 25 for better quality
-            "-profile:v", "main",   // Changed from baseline for better compression
-            "-level", "4.0",        // Changed from 3.1 for better compatibility
+            "-preset", "ultrafast",  // Fastest encoding
+            "-crf", "30",            // Higher CRF = much faster encoding, smaller files
+            "-profile:v", "baseline", // Simplest profile for speed
+            "-level", "3.0",
             "-pix_fmt", "yuv420p",
-            "-c:a", "aac",          // Changed from copy to ensure compatibility
-            "-b:a", "128k",         // Audio bitrate
+            "-c:a", "copy",          // Copy audio (no re-encoding)
             "-movflags", "+faststart",
-            "-threads", "0",        // Use all available threads
+            "-threads", "0",         // Use all CPU threads
+            "-tune", "fastdecode",   // Optimize for fast decoding
           ])
           .output(outputPath)
           .on("start", (cmd) => {
@@ -166,34 +151,16 @@ async function processRender(jobId, videoPath, frameId) {
           })
           .on("end", () => {
             logger.info({ jobId }, "FFmpeg process ended successfully");
-            // Clean up overlay file
-            try {
-              fs.unlinkSync(overlayPath);
-              logger.debug({ jobId }, "Overlay file cleaned up");
-            } catch (err) {
-              logger.warn({ jobId, error: err.message }, "Failed to clean up overlay file");
-            }
+            // No overlay cleanup needed (using frame directly)
             resolve();
           })
           .on("error", (err) => {
             logger.error({ jobId, error: err.message, stderr: err.stderr }, "FFmpeg error");
-            // Clean up overlay file on error
-            try {
-              fs.unlinkSync(overlayPath);
-            } catch (cleanupErr) {
-              logger.debug({ jobId }, "Overlay file cleanup skipped");
-            }
             reject(new Error(`FFmpeg encoding failed: ${err.message}`));
           })
           .run();
       } catch (err) {
         logger.error({ jobId, error: err.message }, "FFmpeg command setup failed");
-        // Clean up overlay file on error
-        try {
-          fs.unlinkSync(overlayPath);
-        } catch (cleanupErr) {
-          logger.debug({ jobId }, "Overlay file cleanup skipped");
-        }
         reject(err);
       }
     });
