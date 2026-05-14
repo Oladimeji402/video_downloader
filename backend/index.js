@@ -71,6 +71,8 @@ const corsOptions = {
     "http://localhost:4000",
     "http://127.0.0.1:3000",
     "http://127.0.0.1:4000",
+    // Add your Vercel frontend URL here when deployed
+    // "https://your-frontend.vercel.app",
   ],
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "Accept"],

@@ -1,0 +1,35 @@
+# Railway ignore file - exclude unnecessary files from deployment
+
+# Frontend (deployed separately on Vercel)
+frontend/
+
+# Documentation
+*.md
+!README.md
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Temporary files
+backend/temp/
+backend/node_modules/.cache/
+
+# Config files for other platforms
+vercel.json
+render.yaml
+render-docker.yaml
+fly.toml
+nixpacks.toml
+
+# Development
+.env.local
+.env.development
