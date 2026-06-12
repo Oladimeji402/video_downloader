@@ -1,203 +1,85 @@
-# Frontend - VideoFramer UI
+# Frontend - Video Framer
 
-Vanilla JavaScript frontend for video framing application.
-
-## Quick Start
-
-Open `index.html` in a browser or serve via the backend at `http://localhost:4000`
+Clean, mobile-first frontend for video framing with social media integration.
 
 ## Features
 
-- **URL Input** - Paste video URLs from TikTok, Instagram, YouTube, Twitter, Facebook
-- **File Upload** - Upload video files directly (max 500MB)
-- **Video Preview** - Real-time preview with frame overlay
-- **Frame Selection** - Choose from available frame templates
-- **Progress Tracking** - Visual progress bars for download and render
-- **Background Pre-rendering** - Starts rendering when frame is selected
-- **Share Options** - Native share, WhatsApp, copy link
-- **Mobile Optimized** - Responsive design with touch support
+- ✅ Paste video URL from TikTok, Instagram, YouTube, Twitter, Facebook
+- ✅ Real-time video preview
+- ✅ Select frame overlay from gallery
+- ✅ Download with frame applied
+- ✅ iOS native share integration
+- ✅ File size display
+- ✅ Progress tracking
+- ✅ PWA support
 
-## Architecture
+## Files
 
-### Core Files
-
-- **index.html** - Main HTML structure
-- **style.css** - Responsive styling with CSS variables
-- **script.js** - Application logic and API integration
-- **env.js** - Environment configuration
-- **manifest.json** - PWA manifest
-
-### Key Components
-
-1. **URL Input Section** - Paste/clear video URLs
-2. **Preview Section** - Video player with frame overlay
-3. **Frame Selector** - Grid of available frames
-4. **Download Section** - Download and share buttons
-5. **Toast Notifications** - User feedback
-6. **Server Banner** - Cold start indicator
+- `index.html` - Main application
+- `style.css` - Responsive styling
+- `script.js` - Core functionality
+- `env.js` - API configuration
+- `manifest.json` - PWA manifest
+- `icon-*.png` - PWA icons
 
 ## Configuration
 
-Edit `env.js` to set API endpoint:
+Edit `env.js` to point to your backend:
 
 ```javascript
 window.ENV = {
-  API_URL: "http://localhost:4000/api"  // Backend API URL
+  API_URL: "https://your-backend.onrender.com/api"
 };
 ```
 
-## State Management
+## Features
 
-The app uses a global `state` object:
+### Video Processing
+- Automatic video download from URL
+- Server-side frame overlay rendering
+- Progress indication during processing
 
-```javascript
-{
-  videoId: null,              // Current video ID
-  selectedFrame: "none",      // Selected frame ID
-  frames: [],                 // Available frames
-  isProcessing: false,        // Processing flag
-  lastRenderedJobId: null,    // Last render job
-  lastRenderedUrl: null,      // Last rendered video URL
-  renderedVideoBlob: null,    // Cached rendered video
-  serverReady: false,         // Server status
-  bgRenderPromise: null       // Background render promise
-}
-```
+### iPhone Optimization
+- iOS detection
+- Native share API integration
+- File size warnings
+- Better download UX
 
-## API Integration
-
-### Endpoints Used
-
-```javascript
-// Video operations
-POST   /api/video/resolve      // Start download
-POST   /api/video/upload       // Upload file
-GET    /api/video/status/:id   // Poll download status
-GET    /api/video/preview/:id  // Stream video
-
-// Frame operations
-GET    /api/frames             // List frames
-GET    /api/frames/:filename   // Get frame image
-
-// Render operations
-POST   /api/video/render       // Start render
-GET    /api/video/render/:id   // Poll render status
-GET    /api/video/download/:id // Download result
-
-// Health
-GET    /api/health             // Server health
-```
-
-### Polling Strategy
-
-- **Interval**: 800ms
-- **Max polls**: 300 (4 minutes)
-- **Exponential backoff** on 429 errors
-- **Auto-retry** on network errors
-
-## Performance Optimizations
-
-1. **Frame Preloading** - All frames loaded on startup
-2. **Background Pre-rendering** - Starts when frame selected
-3. **Blob Caching** - Rendered videos cached in memory
-4. **Lazy Loading** - Frame images loaded on demand
-5. **Server Keep-alive** - Pings every 14 minutes to prevent cold starts
-
-## User Flow
-
-```
-1. User pastes URL or uploads file
-   ↓
-2. Video downloads (progress shown)
-   ↓
-3. Preview appears with frame overlay
-   ↓
-4. User selects frame (pre-render starts)
-   ↓
-5. User clicks Download/Share
-   ↓
-6. Rendered video ready (instant if pre-rendered)
-```
-
-## Supported Platforms
-
-- TikTok
-- Instagram
-- YouTube
-- Twitter/X
-- Facebook
-
-## Browser Compatibility
-
-- **Modern browsers** - Chrome, Firefox, Safari, Edge (latest 2 versions)
-- **Mobile** - iOS Safari, Chrome Mobile
-- **Features** - ES6+, Fetch API, Async/Await, Web Share API
-
-## Customization
-
-### Styling
-
-Edit CSS variables in `style.css`:
-
-```css
-:root {
-  --primary: #6366f1;
-  --primary-dark: #4f46e5;
-  --success: #10b981;
-  --error: #ef4444;
-  --warning: #f59e0b;
-  /* ... */
-}
-```
-
-### Polling Intervals
-
-Edit constants in `script.js`:
-
-```javascript
-const POLL_INTERVAL = 800;  // Status polling interval (ms)
-```
-
-## Troubleshooting
-
-### Video Not Loading
-- Check browser console for errors
-- Verify API_URL in env.js
-- Check network tab for failed requests
-
-### Frame Not Showing
-- Ensure frame has transparent center
-- Check frame is loaded in /api/frames
-- Verify frame ID matches
-
-### Share Not Working
-- Web Share API requires HTTPS (except localhost)
-- Check browser compatibility
-- Fallback to copy link
-
-### Slow Performance
-- Check network speed
-- Verify server is not cold-starting
-- Try smaller video files
-
-## Development
-
-### Local Development
-
-1. Start backend: `cd backend && npm start`
-2. Open `frontend/index.html` in browser
-3. Or visit `http://localhost:4000`
-
-### Testing
-
-- Test with various video URLs
-- Test file upload
-- Test on mobile devices
-- Test share functionality
-- Test offline behavior
+### Frame Selection
+- Visual frame gallery
+- Instant preview overlay
+- Pre-rendering for faster downloads
+- Frame image caching
 
 ## Deployment
 
-The frontend is served by the backend Express server. No separate deployment needed.
+### Vercel (Recommended)
+```bash
+vercel --prod
+```
 
-For CDN deployment, update `env.js` with production API URL.
+### Netlify
+Drag and drop `frontend` folder to Netlify dashboard.
+
+### GitHub Pages
+1. Push to GitHub
+2. Settings → Pages
+3. Select branch and `/frontend` folder
+
+### Any Static Host
+Upload all files in `frontend` folder to your static hosting.
+
+## Browser Support
+
+- Modern browsers (Chrome, Safari, Firefox, Edge)
+- iOS Safari 14+ (native share support)
+- Android Chrome 90+
+- Progressive Web App (installable)
+
+## Performance
+
+Optimized for mobile:
+- Lazy loading frame thumbnails
+- Chunked video streaming
+- Progress tracking for long operations
+- File size warnings for cellular users

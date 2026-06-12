@@ -1,46 +1,32 @@
-# Backend - VideoFramer API
+# Backend - Video Framer API
 
-Express.js backend for video downloading, processing, and frame overlay rendering.
+Express.js backend for video downloading, processing, and frame overlay.
 
-## Quick Start
+## Dependencies
 
-```bash
-npm install
-npm start
-```
-
-Server runs on `http://localhost:4000`
-
-## Architecture
-
-### Services
-
-- **downloader.js** - Handles video downloads from social media URLs using yt-dlp
-- **processor.js** - FFmpeg-based video processing and frame overlay rendering
-- **redis.js** - Optional Redis connection for job queues (falls back to in-memory)
-- **rateLimiter.js** - Rate limiting (20 requests/hour per IP)
-- **fileCleanup.js** - Automatic cleanup of temp files (30min TTL)
-- **logger.js** - Pino-based structured logging
-
-### Routes
-
-- **video.routes.js** - All API endpoints for video operations
+- **express**: Web server
+- **fluent-ffmpeg**: Video processing
+- **ytdl-core**: YouTube downloads
+- **yt-dlp**: Multi-platform video downloads (TikTok, Instagram, etc.)
+- **sharp**: Image processing
+- **bull**: Job queue (requires Redis, optional)
+- **multer**: File uploads
 
 ## API Endpoints
 
-### Video Download
-- `POST /api/video/resolve` - Start download from URL
-- `POST /api/video/upload` - Upload video file (max 500MB)
-- `GET /api/video/status/:videoId` - Check download progress
-- `GET /api/video/preview/:videoId` - Stream video for preview
+### Video Operations
+- `POST /api/video/resolve` - Start video download from URL
+- `POST /api/video/upload` - Upload video file
+- `GET /api/video/status/:id` - Check download status
+- `GET /api/video/preview/:id` - Stream video
 
-### Frame Management
+### Frame Operations
 - `GET /api/frames` - List available frame templates
-- `GET /api/frames/:filename` - Serve frame image
+- `GET /api/frames/:filename` - Get frame image
 
-### Video Rendering
-- `POST /api/video/render` - Start rendering with frame overlay
-- `GET /api/video/render/:jobId` - Check render progress
+### Render Operations
+- `POST /api/video/render` - Start frame overlay rendering
+- `GET /api/video/render/:jobId` - Check render status
 - `GET /api/video/download/:jobId` - Download rendered video
 
 ### Health
@@ -50,80 +36,63 @@ Server runs on `http://localhost:4000`
 
 ```bash
 PORT=4000                    # Server port
-REDIS_URL=redis://localhost:6379  # Optional Redis connection
+REDIS_URL=redis://...       # Optional: Redis for job queue
+NODE_OPTIONS=--max-old-space-size=450  # Memory limit for free tier
 ```
 
-## Dependencies
+## Performance Settings
 
-### Required System Tools
-- **FFmpeg** - Video processing
-- **yt-dlp** - Social media video downloads
+Optimized for **512MB RAM free tier hosting**:
+- Resolution: 270p max
+- FFmpeg preset: faster
+- Audio bitrate: 64k
+- Buffer size: 1MB
+- Max video duration: 120 seconds (2 minutes)
+- Thread limit: 2
 
-### Node Packages
-- express - Web framework
-- fluent-ffmpeg - FFmpeg wrapper
-- sharp - Image processing
-- ytdl-core - YouTube downloads
-- bull - Job queue (requires Redis)
-- multer - File uploads
-- pino - Logging
+## File Cleanup
 
-## Performance Optimizations
+Automatic cleanup runs every 10 minutes:
+- Deletes files older than 30 minutes
+- Cleans downloads, renders, and uploads folders
 
-1. **Resolution capping** - Videos scaled to max 720p for faster processing
-2. **FFmpeg preset** - Uses "ultrafast" for quick encoding
-3. **Sharp preprocessing** - Frame images processed with Sharp (10x faster than FFmpeg)
-4. **In-memory fallback** - Works without Redis for small deployments
-5. **File cleanup** - Automatic deletion of files older than 30 minutes
+## Rate Limiting
 
-## Adding Custom Frames
+- 20 expensive operations per hour per IP
+- Only applies to: resolve, upload, render
+- Does NOT apply to: status checks, streaming, frame lists
 
-1. Create PNG with transparent center
-2. Place in `backend/frames/` directory
-3. Name format: `frame-{name}.png` or `{name}.png`
-4. Restart server or wait for auto-reload
+## Running Locally
 
-## Troubleshooting
-
-### FFmpeg Issues
-- Ensure FFmpeg is in PATH: `ffmpeg -version`
-- Check logs for FFmpeg errors
-- Verify video codec compatibility
-
-### yt-dlp Issues
-- Update: `pip install -U yt-dlp`
-- Check platform support
-- Some videos may be geo-restricted
-
-### Performance Issues
-- Enable Redis for better queue management
-- Reduce video resolution cap in processor.js
-- Increase file cleanup interval
-- Check server resources (CPU/RAM)
-
-## File Structure
-
+```bash
+npm install
+npm start
 ```
-backend/
-├── index.js              # Server entry point
-├── routes/
-│   └── video.routes.js   # API routes
-├── services/
-│   ├── downloader.js     # Video downloads
-│   ├── processor.js      # Video processing
-│   ├── redis.js          # Redis connection
-│   ├── rateLimiter.js    # Rate limiting
-│   ├── fileCleanup.js    # Temp file cleanup
-│   └── logger.js         # Logging
-├── frames/               # Frame templates (PNG)
-├── temp/
-│   ├── downloads/        # Downloaded videos
-│   ├── uploads/          # Uploaded videos
-│   └── rendered/         # Rendered outputs
-└── scripts/
-    └── generate-frames.js # Frame generator
+
+Server runs on http://localhost:4000
+
+## Upgrading Performance
+
+For paid hosting with 2GB+ RAM, edit `services/processor.js`:
+
+```javascript
+// Increase resolution
+const maxDimension = 540; // or 720 for HD
+
+// Remove duration limit
+// Comment out the duration check
+
+// Better quality preset
+"-preset", "veryfast"  // instead of "faster"
+"-crf", "23"            // instead of "30"
 ```
 
 ## Deployment
 
-See main README.md for deployment instructions to Render, Railway, or Fly.io.
+Designed for:
+- Render (free or paid)
+- Railway
+- Fly.io
+- Any Node.js hosting with FFmpeg support
+
+Ensure FFmpeg and yt-dlp are available in the environment.

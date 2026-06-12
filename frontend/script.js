@@ -399,6 +399,8 @@ async function renderVideoWithFrame(progressCallback) {
   }
 
   const { jobId } = await res.json();
+  const startTime = Date.now();
+  let slowWarningShown = false;
 
   // Poll completion
   while (true) {
@@ -419,7 +421,14 @@ async function renderVideoWithFrame(progressCallback) {
       throw new Error(errorMsg);
     }
     if (progressCallback && status.progress) {
-      progressCallback(status.progress);
+      // Show helpful message for long renders
+      const elapsed = (Date.now() - startTime) / 1000;
+      if (elapsed > 60 && !slowWarningShown && status.progress < 80) {
+        slowWarningShown = true;
+        progressCallback(status.progress, "Long video - this may take 2-3 minutes on free hosting...");
+      } else {
+        progressCallback(status.progress);
+      }
     }
   }
 }
@@ -591,28 +600,62 @@ async function downloadVideo() {
     showDownloadModal(true);
     updateDownloadModalProgress(0, "Rendering with frame...");
 
-    const blob = await renderVideoWithFrame((progress) => {
-      updateDownloadModalProgress(progress, `Rendering... ${progress}%`);
+    const blob = await renderVideoWithFrame((progress, message) => {
+      const displayMsg = message || `Rendering... ${progress}%`;
+      updateDownloadModalProgress(progress, displayMsg);
     });
 
     // Update modal for download preparation
     updateDownloadModalProgress(100, "Preparing download...");
 
+    // Check file size
+    const fileSizeMB = (blob.size / (1024 * 1024)).toFixed(2);
+    console.log(`Download size: ${fileSizeMB}MB`);
+
+    // For iOS, use a different approach
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    
+    if (isIOS) {
+      // On iOS, create a shareable URL and prompt user
+      updateDownloadModalProgress(100, `Ready (${fileSizeMB}MB) - Tap to save`);
+      
+      // Try native share first (better for iOS)
+      try {
+        const file = new File([blob], `framed-video-${Date.now()}.mp4`, { type: "video/mp4" });
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          closeDownloadModal();
+          await navigator.share({ files: [file], title: "Framed Video" });
+          showToast("Video saved!", "success");
+          return;
+        }
+      } catch (shareErr) {
+        console.log("Native share failed, using fallback:", shareErr);
+      }
+    }
+
+    // Standard download (desktop and fallback for mobile)
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
     a.download = `framed-video-${Date.now()}.mp4`;
     document.body.appendChild(a);
     a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
     
     // Show success in modal briefly before closing
-    updateDownloadModalProgress(100, "Download started!");
+    updateDownloadModalProgress(100, `Downloading (${fileSizeMB}MB)...`);
+    
+    // Clean up after a delay
     setTimeout(() => {
+      a.remove();
+      URL.revokeObjectURL(url);
       closeDownloadModal();
-      showToast("Download complete!", "success");
-    }, 800);
+      
+      if (isIOS) {
+        showToast(`Check Files app for download (${fileSizeMB}MB)`, "success");
+      } else {
+        showToast("Download complete!", "success");
+      }
+    }, 1500);
   } catch (err) {
     closeDownloadModal();
     
@@ -666,21 +709,51 @@ async function downloadOriginalVideo() {
     }
 
     const blob = new Blob(chunks, { type: 'video/mp4' });
+    const fileSizeMB = (blob.size / (1024 * 1024)).toFixed(2);
+    
+    // Check if iOS
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    
+    if (isIOS) {
+      // On iOS, try native share first
+      updateDownloadModalProgress(100, `Ready (${fileSizeMB}MB) - Tap to save`);
+      
+      try {
+        const file = new File([blob], `video-${Date.now()}.mp4`, { type: "video/mp4" });
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          closeDownloadModal();
+          await navigator.share({ files: [file], title: "Video" });
+          showToast("Video saved!", "success");
+          btn.disabled = false;
+          return;
+        }
+      } catch (shareErr) {
+        console.log("Native share failed, using fallback:", shareErr);
+      }
+    }
+    
+    // Standard download
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
     a.download = `video-${Date.now()}.mp4`;
     document.body.appendChild(a);
     a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
     
     // Show success in modal briefly before closing
-    updateDownloadModalProgress(100, "Download started!");
+    updateDownloadModalProgress(100, `Downloading (${fileSizeMB}MB)...`);
+    
     setTimeout(() => {
+      a.remove();
+      URL.revokeObjectURL(url);
       closeDownloadModal();
-      showToast("Download complete!", "success");
-    }, 800);
+      
+      if (isIOS) {
+        showToast(`Check Files app for download (${fileSizeMB}MB)`, "success");
+      } else {
+        showToast("Download complete!", "success");
+      }
+    }, 1500);
   } catch (err) {
     closeDownloadModal();
     
