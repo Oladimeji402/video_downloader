@@ -35,8 +35,6 @@ const elements = {
   renderProgress: document.getElementById("renderProgress"),
 
   shareBtn: document.getElementById("shareBtn"),
-  whatsappBtn: document.getElementById("whatsappBtn"),
-  copyLinkBtn: document.getElementById("copyLinkBtn"),
 
   toastContainer: document.getElementById("toastContainer"),
 
@@ -51,6 +49,8 @@ const elements = {
   uploadLabel: document.querySelector(".btn-upload"),
   resetBtn: document.getElementById("resetBtn"),
   previewSourceLabel: document.getElementById("previewSourceLabel"),
+  timeEstimate: document.getElementById("timeEstimate"),
+  progressTip: document.getElementById("progressTip"),
 };
 
 // ===========================================
@@ -77,6 +77,83 @@ const VALID_DOMAINS = [
   "tiktok.com", "instagram.com", "youtube.com", "youtu.be",
   "twitter.com", "x.com", "facebook.com", "fb.watch"
 ];
+
+// ===========================================
+// Progress & Time Estimation
+// ===========================================
+const PLATFORM_ESTIMATES = {
+  tiktok: { download: 10, render: 8 },
+  instagram: { download: 20, render: 8 },
+  youtube: { download: 15, render: 10 },
+  twitter: { download: 12, render: 8 },
+  facebook: { download: 15, render: 9 },
+  default: { download: 15, render: 10 },
+};
+
+const TIPS = [
+  "💡 Tip: Upload videos directly for faster results",
+  "⚡ Did you know? TikTok downloads are usually fastest",
+  "📱 Instagram acting up? Save the reel and upload instead",
+  "🎯 Pro tip: Videos under 30 seconds process much faster",
+  "✨ Frame selection happens instantly — no re-download needed",
+];
+
+function updateProgressStep(step) {
+  const steps = document.querySelectorAll(".progress-step");
+  const stepOrder = ["connecting", "downloading", "ready"];
+  const currentIndex = stepOrder.indexOf(step);
+
+  steps.forEach((el) => {
+    const elStep = el.dataset.step;
+    const elIndex = stepOrder.indexOf(elStep);
+
+    el.classList.remove("active", "completed");
+
+    if (elIndex < currentIndex) {
+      el.classList.add("completed");
+    } else if (elIndex === currentIndex) {
+      el.classList.add("active");
+    }
+  });
+}
+
+function detectPlatformFromUrl(url) {
+  if (!url) return "default";
+  if (url.includes("tiktok")) return "tiktok";
+  if (url.includes("instagram")) return "instagram";
+  if (url.includes("youtube") || url.includes("youtu.be")) return "youtube";
+  if (url.includes("twitter") || url.includes("x.com")) return "twitter";
+  if (url.includes("facebook") || url.includes("fb.watch")) return "facebook";
+  return "default";
+}
+
+function showTimeEstimate(platform, type = "download") {
+  const estimate = PLATFORM_ESTIMATES[platform] || PLATFORM_ESTIMATES.default;
+  const seconds = type === "download" ? estimate.download : estimate.render;
+
+  if (elements.timeEstimate) {
+    elements.timeEstimate.textContent = `Usually takes ${seconds}-${seconds + 10} seconds`;
+    elements.timeEstimate.classList.remove("hidden");
+  }
+}
+
+function showRandomTip() {
+  if (elements.progressTip) {
+    const tip = TIPS[Math.floor(Math.random() * TIPS.length)];
+    elements.progressTip.textContent = tip;
+    elements.progressTip.classList.remove("hidden");
+  }
+}
+
+function hideProgressExtras() {
+  elements.timeEstimate?.classList.add("hidden");
+  elements.progressTip?.classList.add("hidden");
+  // Reset all progress steps
+  document.querySelectorAll(".progress-step").forEach(el => {
+    el.classList.remove("active", "completed");
+  });
+}
+
 
 function isValidSocialUrl(url) {
   if (!url || typeof url !== "string") return false;
@@ -571,6 +648,11 @@ async function uploadVideo(file) {
   }
 
   hideFetchError();
+  hideProgressExtras();
+  
+  // Show upload progress
+  updateProgressStep("connecting");
+  
   state.isProcessing = true;
   setGoLoading(true);
   elements.fetchProgress.style.width = "0%";
@@ -598,6 +680,8 @@ async function uploadVideo(file) {
     if (!data.videoId) throw new Error("No videoId returned");
 
     state.videoId = data.videoId;
+    updateProgressStep("ready");
+    hideProgressExtras();
     elements.fetchProgress.style.width = "100%";
     elements.fetchStatus.classList.add("hidden");
     // Show filename (trimmed to keep it tidy)
@@ -605,6 +689,7 @@ async function uploadVideo(file) {
     showVideoPreview(shortName);
     showToast("Video uploaded!", "success");
   } catch (err) {
+    hideProgressExtras();
     showToast(err.message || "Failed to upload video", "error", 5000);
     elements.fetchStatus.classList.add("hidden");
   } finally {
@@ -630,6 +715,16 @@ async function fetchVideo() {
   state.isProcessing = true;
   setGoLoading(true);
   hideFetchError();
+  hideProgressExtras();
+  
+  // Detect platform for time estimates
+  const platform = detectPlatformFromUrl(url);
+  
+  // Show initial progress step
+  updateProgressStep("connecting");
+  showTimeEstimate(platform, "download");
+  showRandomTip();
+  
   elements.fetchProgress.style.width = "0%";
 
   try {
@@ -642,6 +737,7 @@ async function fetchVideo() {
     const data = await res.json();
     
     if (!data.success) {
+      hideProgressExtras();
       // Better error messages
       let errorMsg = data.error || "Failed to start download";
       if (errorMsg.includes("Unsupported URL")) {
@@ -655,7 +751,10 @@ async function fetchVideo() {
     if (!data.videoId) throw new Error("No videoId returned");
 
     state.videoId = data.videoId;
-    elements.fetchStatusText.textContent = "Fetching video...";
+    
+    // Move to downloading step
+    updateProgressStep("downloading");
+    elements.fetchStatusText.textContent = "Downloading video...";
 
     pollStatus(
       `/video/status/${data.videoId}`,
@@ -663,6 +762,10 @@ async function fetchVideo() {
       elements.fetchStatusText,
       elements.fetchProgress,
       () => {
+        // Move to ready step
+        updateProgressStep("ready");
+        hideProgressExtras();
+        
         // Derive a short label from the URL (e.g. "tiktok.com")
         let label = "";
         try { label = new URL(url).hostname.replace("www.", ""); } catch (_) {}
@@ -672,6 +775,7 @@ async function fetchVideo() {
         setGoLoading(false);
       },
       (err) => {
+        hideProgressExtras();
         let errorMsg = err.message || "Failed to download video";
 
         if (err.suggestUpload || err.errorCode === "INSTAGRAM_AUTH_REQUIRED") {
@@ -686,6 +790,7 @@ async function fetchVideo() {
       }
     );
   } catch (err) {
+    hideProgressExtras();
     showToast(err.message || "Failed to connect to server", "error");
     state.isProcessing = false;
     setGoLoading(false);
@@ -774,15 +879,15 @@ async function downloadVideo() {
   try {
     // Show download modal with render progress
     showDownloadModal(true);
-    updateDownloadModalProgress(0, "Rendering with frame...");
+    updateDownloadModalProgress(0, "Preparing video...", "preparing");
 
     const blob = await renderVideoWithFrame((progress, message) => {
       const displayMsg = message || `Rendering... ${progress}%`;
-      updateDownloadModalProgress(progress, displayMsg);
+      updateDownloadModalProgress(progress, displayMsg, "rendering");
     });
 
     // Update modal for download preparation
-    updateDownloadModalProgress(100, "Preparing download...");
+    updateDownloadModalProgress(100, "Preparing download...", "downloading");
 
     // Check file size
     const fileSizeMB = (blob.size / (1024 * 1024)).toFixed(2);
@@ -859,10 +964,12 @@ async function downloadOriginalVideo() {
   try {
     // Show download modal
     showDownloadModal(false);
-    updateDownloadModalProgress(0, "Downloading video...");
+    updateDownloadModalProgress(0, "Connecting...", "preparing");
 
     const res = await fetch(`${API_BASE}/video/preview/${state.videoId}`);
     if (!res.ok) throw new Error("Failed to download video");
+    
+    updateDownloadModalProgress(10, "Downloading video...", "downloading");
     
     const contentLength = res.headers.get('content-length');
     const total = parseInt(contentLength, 10);
@@ -880,7 +987,7 @@ async function downloadOriginalVideo() {
       
       if (total) {
         const progress = Math.round((loaded / total) * 100);
-        updateDownloadModalProgress(progress, `Downloading... ${progress}%`);
+        updateDownloadModalProgress(progress, `Downloading... ${progress}%`, "downloading");
       }
     }
 
@@ -1135,12 +1242,28 @@ function showDownloadModal(showProgress = false) {
     <div class="share-modal-overlay" id="downloadModalOverlay">
       <div class="share-modal">
         <div class="share-modal-content">
-          <div class="share-spinner-large"></div>
-          <h3 class="share-modal-title">Downloading Video</h3>
+          <div class="progress-steps">
+            <div class="progress-step active" data-step="preparing">
+              <span class="progress-step-dot"></span>
+              <span>Preparing</span>
+            </div>
+            <span class="progress-step-arrow">→</span>
+            <div class="progress-step" data-step="rendering">
+              <span class="progress-step-dot"></span>
+              <span>Rendering</span>
+            </div>
+            <span class="progress-step-arrow">→</span>
+            <div class="progress-step" data-step="downloading">
+              <span class="progress-step-dot"></span>
+              <span>Downloading</span>
+            </div>
+          </div>
           <p class="share-modal-text" id="downloadModalText">
             ${showProgress ? "Rendering with frame..." : "Preparing download..."}
           </p>
-          ${showProgress ? '<div class="share-modal-progress"><div class="share-modal-progress-bar" id="downloadModalProgressBar"></div></div>' : '<div class="share-modal-progress"><div class="share-modal-progress-bar" id="downloadModalProgressBar"></div></div>'}
+          <div class="share-modal-progress">
+            <div class="share-modal-progress-bar" id="downloadModalProgressBar"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -1148,12 +1271,35 @@ function showDownloadModal(showProgress = false) {
   document.body.insertAdjacentHTML("beforeend", html);
 }
 
-function updateDownloadModalProgress(progress, text) {
+function updateDownloadModalProgress(progress, text, step = null) {
   const textEl = document.getElementById("downloadModalText");
   const progressBar = document.getElementById("downloadModalProgressBar");
   
   if (textEl) textEl.textContent = text;
   if (progressBar) progressBar.style.width = `${progress}%`;
+  
+  // Update step indicator
+  if (step) {
+    const modal = document.getElementById("downloadModalOverlay");
+    if (modal) {
+      const steps = modal.querySelectorAll(".progress-step");
+      const stepOrder = ["preparing", "rendering", "downloading"];
+      const currentIndex = stepOrder.indexOf(step);
+
+      steps.forEach((el) => {
+        const elStep = el.dataset.step;
+        const elIndex = stepOrder.indexOf(elStep);
+
+        el.classList.remove("active", "completed");
+
+        if (elIndex < currentIndex) {
+          el.classList.add("completed");
+        } else if (elIndex === currentIndex) {
+          el.classList.add("active");
+        }
+      });
+    }
+  }
 }
 
 function closeDownloadModal() {
@@ -1224,8 +1370,6 @@ elements.frameOptions.addEventListener("click", (e) => {
 });
 
 elements.shareBtn.addEventListener("click", (e) => { e.preventDefault(); shareVideo(); });
-elements.whatsappBtn.addEventListener("click", (e) => { e.preventDefault(); shareToWhatsApp(); });
-elements.copyLinkBtn.addEventListener("click", (e) => { e.preventDefault(); copyVideoLink(); });
 elements.resetBtn?.addEventListener("click", (e) => { e.preventDefault(); resetToStart(); });
 
 // ===========================================

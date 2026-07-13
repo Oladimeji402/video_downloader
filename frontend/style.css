@@ -150,13 +150,10 @@ body {
   border-radius: var(--radius);
   padding: 24px;
   margin-bottom: 16px;
-  transition: border-color var(--transition), box-shadow var(--transition);
+  transition: border-color var(--transition);
   animation: fadeUp .4s ease both;
-  box-shadow: 0 1px 3px rgba(0,0,0,.05);
 }
-.card:hover {
-  box-shadow: 0 4px 12px rgba(0,0,0,.08);
-}
+
 .card:nth-child(2) { animation-delay: .05s; }
 .card:nth-child(3) { animation-delay: .1s; }
 .card:nth-child(4) { animation-delay: .15s; }
@@ -710,4 +707,254 @@ body {
   .frame-preview { max-height: 360px; }
   .action-row { gap: 6px; }
   .btn-action { padding: 12px 6px; font-size: .72rem; }
+}
+
+/* ── Fetch & Render Status ── */
+.fetch-status, .render-status {
+  margin: 16px 0 0;
+  padding: 16px;
+  background: var(--card);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+
+.fetch-status-text, .render-status-text {
+  font-size: .82rem;
+  color: var(--text-2);
+  margin-bottom: 8px;
+  text-align: center;
+}
+
+/* Multi-step progress */
+.progress-steps {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 12px 0 8px;
+  flex-wrap: wrap;
+}
+
+.progress-step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: .75rem;
+  color: var(--text-3);
+  transition: all var(--transition);
+}
+
+.progress-step.active {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.progress-step.completed {
+  color: var(--success);
+}
+
+.progress-step-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--border);
+  transition: all var(--transition);
+}
+
+.progress-step.active .progress-step-dot {
+  background: var(--primary);
+  box-shadow: 0 0 0 3px rgba(101, 163, 13, 0.15);
+}
+
+.progress-step.completed .progress-step-dot {
+  background: var(--success);
+}
+
+.progress-step-arrow {
+  color: var(--text-3);
+  font-size: .7rem;
+  opacity: 0.5;
+}
+
+.time-estimate {
+  font-size: .72rem;
+  color: var(--text-3);
+  text-align: center;
+  margin-top: 4px;
+  font-style: italic;
+}
+
+.progress-tip {
+  font-size: .72rem;
+  color: var(--text-3);
+  text-align: center;
+  margin-top: 8px;
+  padding: 8px;
+  background: rgba(101, 163, 13, 0.05);
+  border-radius: 6px;
+  border: 1px solid rgba(101, 163, 13, 0.1);
+}
+
+/* Skeleton screens for frame loading */
+.frames-skeleton {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.skeleton-frame {
+  aspect-ratio: 9/16;
+  background: linear-gradient(90deg, var(--border) 0%, rgba(255,255,255,0.1) 50%, var(--border) 100%);
+  background-size: 200% 100%;
+  border-radius: 8px;
+  animation: skeleton-shimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes skeleton-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ── Action Buttons (Simplified) ── */
+.action-row-main {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.btn-download-main {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 16px 24px;
+  border: none;
+  border-radius: var(--radius);
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: white;
+  font-family: 'Sora', sans-serif;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform var(--transition), box-shadow var(--transition);
+  box-shadow: 0 4px 16px rgba(16, 185, 129, .25);
+}
+
+.btn-download-main svg {
+  width: 20px;
+  height: 20px;
+}
+
+.btn-download-main:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(16, 185, 129, .35);
+}
+
+.btn-download-main:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.btn-download-main:disabled {
+  opacity: .6;
+  cursor: not-allowed;
+}
+
+.btn-share-secondary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px 20px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--text-1);
+  font-family: 'Sora', sans-serif;
+  font-size: .95rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.btn-share-secondary svg {
+  width: 18px;
+  height: 18px;
+}
+
+.btn-share-secondary:hover:not(:disabled) {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: rgba(101, 163, 13, 0.05);
+}
+
+.btn-share-secondary:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+@media (max-width: 600px) {
+  .action-row-main {
+    grid-template-columns: 1fr;
+  }
+  
+  .btn-download-main {
+    order: 1;
+  }
+  
+  .btn-share-secondary {
+    order: 2;
+  }
+}
+
+/* Smooth section transitions */
+.preview-section,
+.action-section {
+  animation: fadeSlideIn 0.4s ease-out;
+}
+
+@keyframes fadeSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Mobile optimizations for frame grid */
+@media (max-width: 600px) {
+  .frame-options {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 14px;
+  }
+  
+  .frame-option {
+    min-height: 120px;
+  }
+  
+  .frame-thumb {
+    min-height: 90px;
+  }
+  
+  .card {
+    padding: 20px;
+  }
+}
+
+/* Further simplify borders on very small screens */
+@media (max-width: 400px) {
+  .card {
+    border-left: none;
+    border-right: none;
+    border-radius: 0;
+  }
+  
+  .app {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
 }
