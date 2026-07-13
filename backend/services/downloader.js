@@ -4,6 +4,7 @@ import path from "path";
 import fs from "fs";
 import { v4 as uuidv4 } from "uuid";
 import { fileURLToPath } from "url";
+import { spawn, execFile } from "child_process";
 import logger from "./logger.js";
 import { isRedisConnected } from "./redis.js";
 import { detectPlatform, parseDownloadError } from "./downloadErrors.js";
@@ -24,6 +25,51 @@ const downloadJobs = new Map();
 
 // Bull queue for download jobs
 let downloadQueue = null;
+
+/**
+ * Attempt to self-update yt-dlp via pip at startup.
+ * Runs fire-and-forget — a failure here is non-fatal.
+ */
+export function updateYtDlp() {
+  // Only run in production (skip in local dev to save time)
+  if (process.env.NODE_ENV !== "production") {
+    logger.info("Skipping yt-dlp auto-update in non-production environment");
+    return;
+  }
+
+  logger.info("Attempting yt-dlp self-update via pip...");
+
+  // Try pip3 first, fall back to pip
+  const tryUpdate = (cmd, args) => {
+    return new Promise((resolve) => {
+      const proc = execFile(cmd, args, { timeout: 60_000 }, (err, stdout, stderr) => {
+        if (err) {
+          resolve({ ok: false, output: stderr || err.message });
+        } else {
+          resolve({ ok: true, output: stdout });
+        }
+      });
+      proc.on("error", () => resolve({ ok: false, output: "command not found" }));
+    });
+  };
+
+  (async () => {
+    // First try: pip3 upgrade
+    let result = await tryUpdate("pip3", ["install", "--upgrade", "--no-cache-dir", "yt-dlp"]);
+
+    if (!result.ok) {
+      // Second try: pip
+      result = await tryUpdate("pip", ["install", "--upgrade", "--no-cache-dir", "yt-dlp"]);
+    }
+
+    if (result.ok) {
+      logger.info("yt-dlp updated successfully");
+    } else {
+      // Not fatal — deployed image may already be recent enough, or pip unavailable
+      logger.warn({ output: result.output }, "yt-dlp auto-update failed (non-fatal)");
+    }
+  })();
+}
 
 function buildYtDlpArgs(outputPath, url) {
   const args = [
@@ -108,8 +154,6 @@ async function processDownload(videoId, url) {
       });
     } else {
       // Fallback to yt-dlp for non-YouTube URLs (TikTok, Instagram, etc.)
-      const { spawn } = await import("child_process");
-      
       await new Promise((resolve, reject) => {
         const ytdlp = spawn("yt-dlp", buildYtDlpArgs(outputPath, url));
 

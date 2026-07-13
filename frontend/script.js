@@ -49,6 +49,8 @@ const elements = {
   fetchErrorText: document.getElementById("fetchErrorText"),
   retryUploadBtn: document.getElementById("retryUploadBtn"),
   uploadLabel: document.querySelector(".btn-upload"),
+  resetBtn: document.getElementById("resetBtn"),
+  previewSourceLabel: document.getElementById("previewSourceLabel"),
 };
 
 // ===========================================
@@ -163,6 +165,56 @@ function triggerUploadPicker() {
   elements.videoUpload?.click();
 }
 
+// ===========================================
+// Reset / Start Over
+// ===========================================
+function resetToStart() {
+  // Stop the video so it releases the source URL
+  if (elements.videoPlayer) {
+    elements.videoPlayer.pause();
+    elements.videoPlayer.removeAttribute("src");
+    elements.videoPlayer.innerHTML = "";
+    elements.videoPlayer.load();
+  }
+
+  // Clear state
+  state.videoId = null;
+  state.selectedFrame = "none";
+  state.isProcessing = false;
+  state.lastRenderedJobId = null;
+  state.lastRenderedUrl = null;
+  state.renderedVideoBlob = null;
+  state.bgRenderPromise = null;
+
+  // Reset frame overlay
+  elements.frameOverlay.style.backgroundImage = "";
+  elements.frameOverlay.classList.remove("visible");
+  elements.framePreview.removeAttribute("data-frame");
+
+  // Reset frame selection UI — restore "none" as selected
+  document.querySelectorAll(".frame-option").forEach(o =>
+    o.classList.toggle("selected", o.dataset.frame === "none")
+  );
+
+  // Clear URL input
+  elements.videoUrl.value = "";
+  updateActionButton();
+
+  // Reset upload button label
+  elements.uploadBtnText.textContent = "Upload video file";
+  if (elements.videoUpload) elements.videoUpload.value = "";
+
+  // Hide result sections
+  elements.previewSection.classList.add("hidden");
+  elements.downloadSection.classList.add("hidden");
+
+  // Clear any error hints
+  hideFetchError();
+
+  // Scroll back to top of input
+  elements.videoUrl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
 function updateActionButton() {
   const hasValue = elements.videoUrl.value.trim().length > 0;
   const btn = elements.actionBtn;
@@ -254,14 +306,21 @@ async function loadFrames() {
       elements.noFramesMsg.classList.add("hidden");
       preloadAllFrames();
 
-      // Pre-select first frame
-      if (state.frames.length > 0) {
-        state.selectedFrame = state.frames[0].id;
+      // Pre-select first frame — use selectFrame() so state + DOM stay in sync
+      if (state.frames.length > 0 && state.selectedFrame === "none") {
+        const firstFrameId = state.frames[0].id;
+        // Set state directly first to avoid the early-return guard in selectFrame
+        state.selectedFrame = firstFrameId;
         setTimeout(() => {
-          const first = document.querySelector(`[data-frame="${state.frames[0].id}"]`);
+          const first = document.querySelector(`[data-frame="${firstFrameId}"]`);
           if (first) {
             document.querySelectorAll(".frame-option").forEach(o => o.classList.remove("selected"));
             first.classList.add("selected");
+          }
+          // If a video is already loaded, kick off the pre-render now
+          if (state.videoId) {
+            updateFramePreview(firstFrameId);
+            startBackgroundPreRender();
           }
         }, 50);
       }
@@ -517,7 +576,9 @@ async function uploadVideo(file) {
   elements.fetchProgress.style.width = "0%";
   elements.fetchStatusText.textContent = "Uploading video...";
   elements.fetchStatus.classList.remove("hidden");
-  elements.uploadBtnText.textContent = "Uploading...";
+  // Show filename in the upload button
+  const shortName = file.name.length > 22 ? file.name.slice(0, 20) + "…" : file.name;
+  elements.uploadBtnText.textContent = shortName;
 
   try {
     const formData = new FormData();
@@ -539,7 +600,9 @@ async function uploadVideo(file) {
     state.videoId = data.videoId;
     elements.fetchProgress.style.width = "100%";
     elements.fetchStatus.classList.add("hidden");
-    showVideoPreview();
+    // Show filename (trimmed to keep it tidy)
+    const shortName = file.name.length > 30 ? file.name.slice(0, 28) + "…" : file.name;
+    showVideoPreview(shortName);
     showToast("Video uploaded!", "success");
   } catch (err) {
     showToast(err.message || "Failed to upload video", "error", 5000);
@@ -547,7 +610,10 @@ async function uploadVideo(file) {
   } finally {
     state.isProcessing = false;
     setGoLoading(false);
-    elements.uploadBtnText.textContent = "Upload video file";
+    // Only reset upload label here if upload failed (success path sets it via showVideoPreview)
+    if (!state.videoId) {
+      elements.uploadBtnText.textContent = "Upload video file";
+    }
     if (elements.videoUpload) elements.videoUpload.value = "";
   }
 }
@@ -597,7 +663,10 @@ async function fetchVideo() {
       elements.fetchStatusText,
       elements.fetchProgress,
       () => {
-        showVideoPreview();
+        // Derive a short label from the URL (e.g. "tiktok.com")
+        let label = "";
+        try { label = new URL(url).hostname.replace("www.", ""); } catch (_) {}
+        showVideoPreview(label);
         showToast("Video loaded!", "success");
         state.isProcessing = false;
         setGoLoading(false);
@@ -624,8 +693,13 @@ async function fetchVideo() {
   }
 }
 
-function showVideoPreview() {
+function showVideoPreview(sourceLabel) {
   if (!state.videoId) { showToast("Error: Video ID missing", "error"); return; }
+
+  // Show source label (URL hostname or filename)
+  if (elements.previewSourceLabel) {
+    elements.previewSourceLabel.textContent = sourceLabel || "";
+  }
 
   const videoUrl = `${API_BASE}/video/preview/${state.videoId}?t=${Date.now()}`;
 
@@ -659,9 +733,18 @@ function showVideoPreview() {
     elements.previewSection.scrollIntoView({ behavior: "smooth", block: "start" });
   }, 100);
 
+  // If no frame is selected yet but frames are available, auto-select the first one
+  if ((!state.selectedFrame || state.selectedFrame === "none") && state.frames.length > 0) {
+    const firstFrameId = state.frames[0].id;
+    state.selectedFrame = firstFrameId;
+    document.querySelectorAll(".frame-option").forEach(o => o.classList.remove("selected"));
+    const firstOpt = document.querySelector(`[data-frame="${firstFrameId}"]`);
+    if (firstOpt) firstOpt.classList.add("selected");
+  }
+
   if (state.selectedFrame && state.selectedFrame !== "none") {
     updateFramePreview(state.selectedFrame);
-    // Start pre-render immediately
+    // Start pre-render immediately so download is fast
     startBackgroundPreRender();
   }
 }
@@ -673,6 +756,13 @@ async function downloadVideo() {
   if (!state.videoId) { showToast("Fetch a video first", "warning"); return; }
 
   if (state.selectedFrame === "none") {
+    // If frames are available but none selected, auto-select the first before downloading
+    if (state.frames.length > 0) {
+      selectFrame(state.frames[0].id);
+      showToast("Frame selected — tap Download again to render it", "info", 3500);
+      return;
+    }
+    // No frames at all — just download the original
     downloadOriginalVideo();
     return;
   }
@@ -1079,12 +1169,7 @@ function closeDownloadModal() {
 elements.actionBtn.addEventListener("click", async (e) => {
   e.preventDefault();
   if (elements.videoUrl.value.trim()) {
-    elements.videoUrl.value = "";
-    state.videoId = null;
-    state.selectedFrame = "none";
-    state.bgRenderPromise = null;
-    elements.previewSection.classList.add("hidden");
-    elements.downloadSection.classList.add("hidden");
+    resetToStart();
   } else {
     try {
       const text = await navigator.clipboard.readText();
@@ -1141,6 +1226,7 @@ elements.frameOptions.addEventListener("click", (e) => {
 elements.shareBtn.addEventListener("click", (e) => { e.preventDefault(); shareVideo(); });
 elements.whatsappBtn.addEventListener("click", (e) => { e.preventDefault(); shareToWhatsApp(); });
 elements.copyLinkBtn.addEventListener("click", (e) => { e.preventDefault(); copyVideoLink(); });
+elements.resetBtn?.addEventListener("click", (e) => { e.preventDefault(); resetToStart(); });
 
 // ===========================================
 // Initialize

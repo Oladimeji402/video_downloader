@@ -53,6 +53,25 @@ export function parseDownloadError(stderr, platform = null) {
       };
     }
 
+    // Instagram returns an empty media response when the post requires login
+    // or when yt-dlp is outdated / the API has changed
+    if (
+      output.includes("empty media response") ||
+      output.includes("empty response") ||
+      output.includes("sent an empty") ||
+      output.includes("no media") ||
+      output.includes("no formats found") ||
+      output.includes("unable to extract")
+    ) {
+      return {
+        message:
+          "Instagram links often fail — save the reel and upload instead.",
+        errorCode: "INSTAGRAM_EMPTY_RESPONSE",
+        suggestUpload: true,
+        platform: "instagram",
+      };
+    }
+
     if (output.includes("private") || output.includes("not found")) {
       return {
         message: "This Instagram post is private, deleted, or unavailable.",
@@ -99,10 +118,20 @@ export function parseDownloadError(stderr, platform = null) {
     };
   }
 
+  // For Instagram, always suggest the upload path — URL downloads are unreliable
+  if (platform === "instagram") {
+    return {
+      message: "Instagram links often fail — save the reel and upload instead.",
+      errorCode: "DOWNLOAD_FAILED",
+      suggestUpload: true,
+      platform,
+    };
+  }
+
   return {
     message: `Could not download this ${platformName} video. Try uploading the file instead.`,
     errorCode: "DOWNLOAD_FAILED",
-    suggestUpload: platform === "instagram",
+    suggestUpload: false,
     platform,
   };
 }

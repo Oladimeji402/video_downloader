@@ -5,6 +5,7 @@ import { fileURLToPath } from "url";
 import multer from "multer";
 import downloader from "../services/downloader.js";
 import processor from "../services/processor.js";
+import logger from "../services/logger.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -91,7 +92,7 @@ router.post("/resolve", async (req, res) => {
       message: "Download started",
     });
   } catch (err) {
-    console.error("Error starting download:", err);
+    logger.error({ error: err.message }, "Error starting download");
     res.status(500).json({
       success: false,
       error: "Could not start download. The video might be private or unavailable.",
@@ -128,7 +129,7 @@ router.post("/upload", upload.single("file"), (req, res) => {
       message: "File uploaded successfully",
     });
   } catch (err) {
-    console.error("Upload error:", err);
+    logger.error({ error: err.message }, "Upload error");
     res.status(500).json({
       success: false,
       error: "Failed to upload file: " + err.message,
@@ -151,18 +152,17 @@ router.get("/status/:videoId", (req, res) => {
     });
   }
 
-  // If completed, check if file actually exists and get size
+  // If completed, verify file exists and get size
   let fileSize = null;
   if (status.status === "completed" && status.outputPath) {
     try {
       if (fs.existsSync(status.outputPath)) {
         fileSize = fs.statSync(status.outputPath).size;
-        console.log(`Video ${videoId}: ${fileSize} bytes`);
       } else {
-        console.error(`Video file missing for ${videoId}: ${status.outputPath}`);
+        logger.warn({ videoId }, "Video file missing on disk");
       }
     } catch (err) {
-      console.error(`Error checking file for ${videoId}:`, err);
+      logger.error({ videoId, error: err.message }, "Error checking video file");
     }
   }
 
@@ -190,29 +190,25 @@ router.get("/preview/:videoId", (req, res) => {
     const videoPath = downloader.getVideoPath(videoId);
 
     if (!videoPath) {
-      console.warn(`Video not found for ID: ${videoId}`);
       return res.status(404).json({
         success: false,
         error: "Video not found or still downloading",
       });
     }
 
-    // Check if file exists
     if (!fs.existsSync(videoPath)) {
-      console.error(`File not found at path: ${videoPath}`);
+      logger.error({ videoId }, "Video file not found on disk during preview");
       return res.status(404).json({
         success: false,
         error: "Video file not found",
       });
     }
 
-    // Get file stats for range requests
     const stat = fs.statSync(videoPath);
     const fileSize = stat.size;
     
-    // Check if file is valid
     if (fileSize === 0) {
-      console.error(`Video file is empty: ${videoPath}`);
+      logger.error({ videoId }, "Video file is empty");
       return res.status(400).json({
         success: false,
         error: "Video file is empty or corrupted",
@@ -221,7 +217,6 @@ router.get("/preview/:videoId", (req, res) => {
 
     const range = req.headers.range;
 
-    // Set common headers for all responses
     const headers = {
       "Accept-Ranges": "bytes",
       "Content-Type": "video/mp4",
@@ -231,13 +226,10 @@ router.get("/preview/:videoId", (req, res) => {
     };
 
     if (range) {
-      // Handle range requests for video seeking
       const parts = range.replace(/bytes=/, "").split("-");
       const start = parseInt(parts[0], 10);
       const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
       const chunkSize = end - start + 1;
-
-      console.log(`Range request: bytes ${start}-${end}/${fileSize}`);
 
       const file = fs.createReadStream(videoPath, { start, end });
       
@@ -248,20 +240,14 @@ router.get("/preview/:videoId", (req, res) => {
       });
       
       file.on("error", (err) => {
-        console.error("Stream error:", err);
+        logger.error({ videoId, error: err.message }, "Stream error during range request");
         if (!res.headersSent) {
-          res.status(500).json({
-            success: false,
-            error: "Error streaming video",
-          });
+          res.status(500).json({ success: false, error: "Error streaming video" });
         }
       });
       
       file.pipe(res);
     } else {
-      // Send entire file
-      console.log(`Full video request: ${fileSize} bytes`);
-      
       res.writeHead(200, {
         ...headers,
         "Content-Length": fileSize,
@@ -270,19 +256,16 @@ router.get("/preview/:videoId", (req, res) => {
       const file = fs.createReadStream(videoPath);
       
       file.on("error", (err) => {
-        console.error("Stream error:", err);
+        logger.error({ videoId, error: err.message }, "Stream error during full request");
         if (!res.headersSent) {
-          res.status(500).json({
-            success: false,
-            error: "Error streaming video",
-          });
+          res.status(500).json({ success: false, error: "Error streaming video" });
         }
       });
       
       file.pipe(res);
     }
   } catch (err) {
-    console.error("Preview endpoint error:", err);
+    logger.error({ error: err.message }, "Preview endpoint error");
     res.status(500).json({
       success: false,
       error: "Failed to stream video: " + err.message,
@@ -335,8 +318,6 @@ router.post("/render", async (req, res) => {
     });
   }
 
-  console.log(`[RENDER] Received render request: videoId=${videoId}, frameId="${frameId}"`);
-
   const videoPath = downloader.getVideoPath(videoId);
   
   if (!videoPath) {
@@ -349,14 +330,13 @@ router.post("/render", async (req, res) => {
   const result = await processor.startRender(videoPath, frameId);
 
   if (result.error) {
-    console.error(`[RENDER] Render failed for frameId="${frameId}": ${result.error}`);
+    logger.error({ frameId, error: result.error }, "Render failed to start");
     return res.status(400).json({
       success: false,
       error: result.error,
     });
   }
 
-  console.log(`[RENDER] Render started: jobId=${result.jobId}, frameId="${frameId}"`);
   res.json({
     success: true,
     jobId: result.jobId,
@@ -408,7 +388,7 @@ router.get("/download/:jobId", (req, res) => {
   
   res.download(videoPath, filename, (err) => {
     if (err) {
-      console.error("Download error:", err);
+      logger.error({ jobId, error: err.message }, "Download send error");
       if (!res.headersSent) {
         res.status(500).json({
           success: false,

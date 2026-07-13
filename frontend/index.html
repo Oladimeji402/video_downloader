@@ -102,6 +102,16 @@
 
     <!-- Step 2: Preview + Frames (hidden by default) -->
     <section id="previewSection" class="card preview-section hidden">
+      <div class="preview-header">
+        <span id="previewSourceLabel" class="preview-source-label"></span>
+        <button id="resetBtn" class="btn-reset" type="button" aria-label="Start over">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+          Start over
+        </button>
+      </div>
       <div class="preview-container">
         <div id="framePreview" class="frame-preview">
           <video id="videoPlayer" controls playsinline webkit-playsinline preload="metadata"></video>

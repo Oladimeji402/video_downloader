@@ -8,10 +8,9 @@ import RateLimiter from "./services/rateLimiter.js";
 import FileCleanupService from "./services/fileCleanup.js";
 import logger from "./services/logger.js";
 import { initRedis, closeRedis } from "./services/redis.js";
-import downloader from "./services/downloader.js";
+import downloader, { updateYtDlp } from "./services/downloader.js";
 import processor from "./services/processor.js";
 import { initInstagramCookies } from "./services/cookies.js";
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -50,6 +49,7 @@ fileCleanup.start();
 // Initialize Redis and job queues
 await initRedis();
 initInstagramCookies();
+updateYtDlp(); // fire-and-forget update on every cold start
 downloader.initDownloadQueue();
 processor.initRenderQueue();
 

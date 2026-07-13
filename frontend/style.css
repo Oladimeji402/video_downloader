@@ -363,6 +363,46 @@ body {
 }
 
 /* ── Preview Section ── */
+.preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.preview-source-label {
+  font-size: .78rem;
+  color: var(--text-3);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 65%;
+}
+
+.btn-reset {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--text-2);
+  font-family: inherit;
+  font-size: .75rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition);
+  flex-shrink: 0;
+}
+.btn-reset svg { width: 12px; height: 12px; }
+.btn-reset:hover {
+  border-color: var(--error);
+  color: var(--error);
+  background: rgba(239, 68, 68, .05);
+}
+
 .preview-container { margin-bottom: 16px; }
 
 .frame-preview {
