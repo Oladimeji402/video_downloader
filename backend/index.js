@@ -155,7 +155,7 @@ app.get("/", (req, res) => {
 
 // Error handling middleware
 app.use((err, req, res, _next) => {
-  console.error("Server error:", err);
+  logger.error({ error: err.message }, "Server error");
   res.status(500).json({
     success: false,
     error: "Internal server error",
