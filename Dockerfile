@@ -10,7 +10,7 @@ RUN apt-get update && \
     ffmpeg \
     python3 \
     python3-pip \
-    && pip3 install --break-system-packages yt-dlp \
+    && pip3 install --break-system-packages --no-cache-dir -U yt-dlp \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 

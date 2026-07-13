@@ -6,6 +6,8 @@ import { v4 as uuidv4 } from "uuid";
 import { fileURLToPath } from "url";
 import logger from "./logger.js";
 import { isRedisConnected } from "./redis.js";
+import { detectPlatform, parseDownloadError } from "./downloadErrors.js";
+import { getInstagramCookiesPath } from "./cookies.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -22,6 +24,46 @@ const downloadJobs = new Map();
 
 // Bull queue for download jobs
 let downloadQueue = null;
+
+function buildYtDlpArgs(outputPath, url) {
+  const args = [
+    "-f", "mp4/best[ext=mp4]/best",
+    "--merge-output-format", "mp4",
+    "-o", outputPath,
+    "--newline",
+    "--progress",
+    "--no-playlist",
+    "--max-filesize", "200M",
+    "--buffer-size", "16K",
+    "--no-update",
+    "--no-warnings",
+  ];
+
+  const platform = detectPlatform(url);
+  const cookiesPath = getInstagramCookiesPath();
+
+  if (platform === "instagram" && cookiesPath) {
+    args.push("--cookies", cookiesPath);
+  }
+
+  args.push(url);
+  return args;
+}
+
+function setDownloadFailure(jobData, url, stderr) {
+  const platform = detectPlatform(url);
+  const parsed = parseDownloadError(stderr, platform);
+
+  if (jobData) {
+    jobData.status = "failed";
+    jobData.error = parsed.message;
+    jobData.errorCode = parsed.errorCode;
+    jobData.suggestUpload = parsed.suggestUpload;
+    jobData.platform = parsed.platform;
+  }
+
+  return parsed;
+}
 
 /**
  * Download video directly (without queue) - used as fallback
@@ -69,17 +111,7 @@ async function processDownload(videoId, url) {
       const { spawn } = await import("child_process");
       
       await new Promise((resolve, reject) => {
-        const ytdlp = spawn("yt-dlp", [
-          "-f", "mp4/best[ext=mp4]/best",
-          "--merge-output-format", "mp4",
-          "-o", outputPath,
-          "--newline",
-          "--progress",
-          "--no-playlist",           // Don't download playlists
-          "--max-filesize", "200M",  // Reduced from 500M to limit memory usage
-          "--buffer-size", "16K",    // Smaller buffer to reduce memory usage
-          url
-        ]);
+        const ytdlp = spawn("yt-dlp", buildYtDlpArgs(outputPath, url));
 
         let stderr = "";
 
@@ -99,11 +131,19 @@ async function processDownload(videoId, url) {
           if (code === 0 && fs.existsSync(outputPath)) {
             resolve();
           } else {
-            reject(new Error(stderr || `yt-dlp exited with code ${code}`));
+            const parsed = setDownloadFailure(jobData, url, stderr);
+            logger.error(
+              { videoId, platform: parsed.platform, errorCode: parsed.errorCode },
+              "yt-dlp download failed"
+            );
+            reject(new Error(parsed.message));
           }
         });
 
-        ytdlp.on("error", reject);
+        ytdlp.on("error", (err) => {
+          const parsed = setDownloadFailure(jobData, url, err.message);
+          reject(new Error(parsed.message));
+        });
       });
     }
 
@@ -118,9 +158,9 @@ async function processDownload(videoId, url) {
   } catch (err) {
     logger.error({ videoId, error: err.message }, "Download failed");
 
-    if (jobData) {
-      jobData.status = "failed";
-      jobData.error = err.message;
+    if (jobData && jobData.status !== "failed") {
+      const parsed = setDownloadFailure(jobData, url, err.message);
+      throw new Error(parsed.message);
     }
 
     throw err;
@@ -187,6 +227,9 @@ export async function startDownload(url) {
     progress: 0,
     outputPath: path.join(DOWNLOADS_DIR, `${videoId}.mp4`),
     error: null,
+    errorCode: null,
+    suggestUpload: false,
+    platform: detectPlatform(url),
     createdAt: Date.now(),
   };
 

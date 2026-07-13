@@ -42,6 +42,13 @@ const elements = {
 
   serverBanner: document.getElementById("serverBanner"),
   serverBannerText: document.getElementById("serverBannerText"),
+
+  videoUpload: document.getElementById("videoUpload"),
+  uploadBtnText: document.getElementById("uploadBtnText"),
+  fetchErrorHint: document.getElementById("fetchErrorHint"),
+  fetchErrorText: document.getElementById("fetchErrorText"),
+  retryUploadBtn: document.getElementById("retryUploadBtn"),
+  uploadLabel: document.querySelector(".btn-upload"),
 };
 
 // ===========================================
@@ -125,7 +132,7 @@ async function wakeServer() {
 // ===========================================
 // Utility Functions
 // ===========================================
-function showToast(message, type = "info") {
+function showToast(message, type = "info", duration = 3000) {
   const toast = document.createElement("div");
   toast.className = `toast ${type}`;
   toast.textContent = message;
@@ -134,7 +141,26 @@ function showToast(message, type = "info") {
     toast.style.opacity = "0";
     toast.style.transform = "translateY(12px)";
     setTimeout(() => toast.remove(), 250);
-  }, 3000);
+  }, duration);
+}
+
+function hideFetchError() {
+  elements.fetchErrorHint.classList.add("hidden");
+  elements.uploadLabel?.classList.remove("upload-highlight");
+}
+
+function showFetchError(message, suggestUpload = false) {
+  elements.fetchErrorText.textContent = message;
+  elements.fetchErrorHint.classList.remove("hidden");
+
+  if (suggestUpload && elements.uploadLabel) {
+    elements.uploadLabel.classList.add("upload-highlight");
+    elements.fetchErrorHint.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+}
+
+function triggerUploadPicker() {
+  elements.videoUpload?.click();
 }
 
 function updateActionButton() {
@@ -189,7 +215,11 @@ async function pollStatus(endpoint, statusEl, textEl, progressEl, onComplete, on
       }
       if (data.status === "failed") {
         statusEl.classList.add("hidden");
-        onError(new Error(data.error || "Processing failed"));
+        const err = new Error(data.error || "Processing failed");
+        err.errorCode = data.errorCode;
+        err.suggestUpload = data.suggestUpload;
+        err.platform = data.platform;
+        onError(err);
         return;
       }
 
@@ -465,6 +495,63 @@ async function pollRenderJob(jobId) {
 // ===========================================
 // Video Operations
 // ===========================================
+async function uploadVideo(file) {
+  if (!file) {
+    showToast("Choose a video file first", "warning");
+    return;
+  }
+
+  if (!file.type.startsWith("video/") && !file.name.match(/\.(mp4|mov|webm)$/i)) {
+    showToast("Please choose a video file (MP4, MOV, or WebM)", "warning");
+    return;
+  }
+
+  if (!state.serverReady) {
+    showToast("Server is still starting up, please wait...", "warning");
+    return;
+  }
+
+  hideFetchError();
+  state.isProcessing = true;
+  setGoLoading(true);
+  elements.fetchProgress.style.width = "0%";
+  elements.fetchStatusText.textContent = "Uploading video...";
+  elements.fetchStatus.classList.remove("hidden");
+  elements.uploadBtnText.textContent = "Uploading...";
+
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const res = await fetch(`${API_BASE}/video/upload`, {
+      method: "POST",
+      body: formData,
+    });
+
+    const data = await res.json();
+
+    if (!data.success) {
+      throw new Error(data.error || "Upload failed");
+    }
+
+    if (!data.videoId) throw new Error("No videoId returned");
+
+    state.videoId = data.videoId;
+    elements.fetchProgress.style.width = "100%";
+    elements.fetchStatus.classList.add("hidden");
+    showVideoPreview();
+    showToast("Video uploaded!", "success");
+  } catch (err) {
+    showToast(err.message || "Failed to upload video", "error", 5000);
+    elements.fetchStatus.classList.add("hidden");
+  } finally {
+    state.isProcessing = false;
+    setGoLoading(false);
+    elements.uploadBtnText.textContent = "Upload video file";
+    if (elements.videoUpload) elements.videoUpload.value = "";
+  }
+}
+
 async function fetchVideo() {
   const url = elements.videoUrl.value.trim();
   if (!url) { showToast("Paste a video URL first", "warning"); return; }
@@ -476,6 +563,7 @@ async function fetchVideo() {
 
   state.isProcessing = true;
   setGoLoading(true);
+  hideFetchError();
   elements.fetchProgress.style.width = "0%";
 
   try {
@@ -515,17 +603,15 @@ async function fetchVideo() {
         setGoLoading(false);
       },
       (err) => {
-        // Better error messages for download failures
         let errorMsg = err.message || "Failed to download video";
-        if (errorMsg.includes("timeout")) {
-          errorMsg = "Download timed out. The video might be too large or unavailable.";
-        } else if (errorMsg.includes("private")) {
-          errorMsg = "This video is private or unavailable.";
-        } else if (errorMsg.includes("not found")) {
-          errorMsg = "Video not found. The link might be broken.";
+
+        if (err.suggestUpload || err.errorCode === "INSTAGRAM_AUTH_REQUIRED") {
+          showFetchError(errorMsg, true);
+          showToast(errorMsg, "error", 6000);
+        } else {
+          showToast(errorMsg, "error", 5000);
         }
-        
-        showToast(errorMsg, "error");
+
         state.isProcessing = false;
         setGoLoading(false);
       }
@@ -1030,6 +1116,16 @@ elements.videoUrl.addEventListener("keydown", (e) => {
 elements.previewBtn.addEventListener("click", (e) => {
   e.preventDefault();
   if (!state.isProcessing) fetchVideo();
+});
+
+elements.videoUpload?.addEventListener("change", (e) => {
+  const file = e.target.files?.[0];
+  if (file && !state.isProcessing) uploadVideo(file);
+});
+
+elements.retryUploadBtn?.addEventListener("click", (e) => {
+  e.preventDefault();
+  triggerUploadPicker();
 });
 
 elements.downloadBtn.addEventListener("click", (e) => {

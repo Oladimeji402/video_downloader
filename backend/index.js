@@ -10,6 +10,7 @@ import logger from "./services/logger.js";
 import { initRedis, closeRedis } from "./services/redis.js";
 import downloader from "./services/downloader.js";
 import processor from "./services/processor.js";
+import { initInstagramCookies } from "./services/cookies.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -48,6 +49,7 @@ fileCleanup.start();
 
 // Initialize Redis and job queues
 await initRedis();
+initInstagramCookies();
 downloader.initDownloadQueue();
 processor.initRenderQueue();
 
@@ -67,6 +69,7 @@ process.on("SIGINT", async () => {
 const corsOptions = {
   origin: [
     "https://videoframer.vercel.app",
+    "https://oframer.vercel.app",
     "http://localhost:3000",
     "http://localhost:4000",
     "http://127.0.0.1:3000",

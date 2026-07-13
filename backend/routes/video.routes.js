@@ -172,6 +172,9 @@ router.get("/status/:videoId", (req, res) => {
     status: status.status,
     progress: status.progress,
     error: status.error,
+    errorCode: status.errorCode || null,
+    suggestUpload: status.suggestUpload || false,
+    platform: status.platform || null,
     fileSize: fileSize,
     isUploaded: status.isUploaded || false,
   });
