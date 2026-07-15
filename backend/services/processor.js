@@ -87,12 +87,12 @@ async function processRender(jobId, videoPath, frameId) {
     // 480p provides noticeably sharper video than 270p while remaining fast to encode
     // For higher quality: increase to 540 or 720 (requires more RAM / paid hosting)
     // For faster processing: decrease to 360 or 270
-    const maxDimension = 480;
+    const maxDimension = 540;
     if (width > maxDimension || height > maxDimension) {
       const scale = maxDimension / Math.max(width, height);
       width = Math.round(width * scale / 2) * 2; // Ensure even dimensions
       height = Math.round(height * scale / 2) * 2;
-      logger.info({ jobId, optimizedWidth: width, optimizedHeight: height }, "Resolution capped at 480p for balanced quality/speed");
+      logger.info({ jobId, optimizedWidth: width, optimizedHeight: height }, "Resolution capped at 540p for balanced quality/speed");
     }
 
     // Duration limit for free tier - prevent extremely long videos that take too long

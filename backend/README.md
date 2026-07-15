@@ -43,7 +43,7 @@ NODE_OPTIONS=--max-old-space-size=450  # Memory limit for free tier
 ## Performance Settings
 
 Optimized for **512MB RAM free tier hosting**:
-- Resolution: 480p max (balanced quality and speed)
+- Resolution: 540p max (balanced quality and speed)
 - FFmpeg preset: faster
 - CRF: 28 (good visual quality)
 - Audio bitrate: 64k
