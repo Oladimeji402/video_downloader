@@ -6,10 +6,10 @@ Add stylish frames to your TikTok, Instagram, YouTube videos instantly!
 
 - ✅ Download videos from TikTok, Instagram, YouTube, Twitter, Facebook
 - ✅ Add custom frame overlays
-- ✅ 270p resolution (optimized for free hosting speed)
+- ✅ 480p resolution (balanced quality and speed)
 - ✅ iPhone/mobile optimized
 - ✅ Native share API for iOS
-- ✅ 2-minute video limit (free tier)
+- ✅ 3-minute video limit (free tier)
 
 ## Tech Stack
 
@@ -59,8 +59,8 @@ Currently deployed on:
 ## Optimization Notes
 
 This app is optimized for **free tier hosting** with limited resources:
-- Resolution capped at 270p (faster processing)
-- 2-minute video duration limit
+- Resolution capped at 480p (balanced quality and speed)
+- 3-minute video duration limit
 - Aggressive file compression
 - Lower audio bitrate
 

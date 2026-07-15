@@ -83,30 +83,31 @@ async function processRender(jobId, videoPath, frameId) {
     
     logger.info({ jobId, width, height, duration }, "Video dimensions determined");
 
-    // Cap resolution at 270p for MAXIMUM SPEED on free-tier hosting (512MB RAM)
-    // Lower resolution = much faster encoding (40% speed boost)
-    // Still acceptable quality for social media viewing
-    const maxDimension = 270;
+    // Resolution limit balanced for free-tier hosting (512MB RAM) + social media quality
+    // 480p provides noticeably sharper video than 270p while remaining fast to encode
+    // For higher quality: increase to 540 or 720 (requires more RAM / paid hosting)
+    // For faster processing: decrease to 360 or 270
+    const maxDimension = 480;
     if (width > maxDimension || height > maxDimension) {
       const scale = maxDimension / Math.max(width, height);
       width = Math.round(width * scale / 2) * 2; // Ensure even dimensions
       height = Math.round(height * scale / 2) * 2;
-      logger.info({ jobId, optimizedWidth: width, optimizedHeight: height }, "Resolution optimized for low memory usage");
+      logger.info({ jobId, optimizedWidth: width, optimizedHeight: height }, "Resolution capped at 480p for balanced quality/speed");
     }
 
     // Duration limit for free tier - prevent extremely long videos that take too long
-    const maxDuration = 120; // 2 minutes max for free tier
+    const maxDuration = 180; // 3 minutes max for free tier
     if (duration > maxDuration) {
-      throw new Error(`Video too long (${Math.round(duration)}s). Maximum ${maxDuration}s (2 minutes) allowed. Please trim your video or upgrade hosting for longer videos.`);
+      throw new Error(`Video too long (${Math.round(duration)}s). Maximum ${maxDuration}s (3 minutes) allowed. Please trim your video or upgrade hosting for longer videos.`);
     }
 
-    logger.info({ jobId, duration }, "Processing video (2 minute limit for free tier)");
+    logger.info({ jobId, duration }, "Processing video (3 minute limit for free tier)");
 
     // Skip Sharp preprocessing for maximum speed - resize frame with FFmpeg instead
     logger.info({ jobId }, "Using direct FFmpeg processing (no Sharp preprocessing)");
     const overlayPath = framePath; // Use frame directly
 
-    // Render with FFmpeg - optimized for FAST sharing (smaller files)
+    // Render with FFmpeg - balanced quality and speed for 480p social media sharing
     logger.info({ jobId, outputPath }, "Starting FFmpeg encoding");
     
     await new Promise((resolve, reject) => {
@@ -126,21 +127,24 @@ async function processRender(jobId, videoPath, frameId) {
             `[1:v]scale=${width}:${height}:flags=fast_bilinear,format=rgba[frame]`,
             "[scaled][frame]overlay=0:0[out]",
           ])
+          // FFmpeg settings tuned for 480p on free-tier hosting (512MB RAM)
+          // CRF 28 = better quality than 30 with minimal speed impact
+          // maxrate/bufsize increased to match 480p bandwidth needs
           .outputOptions([
             "-map", "[out]",
             "-map", "0:a?",
             "-c:v", "libx264",
-            "-preset", "faster",     // Even faster than veryfast (20% speed boost)
-            "-crf", "30",            // Slightly lower quality but much faster
+            "-preset", "faster",     // Good speed/quality balance for free tier
+            "-crf", "28",            // Better quality than 30, still fast to encode
             "-profile:v", "main",    // Better compression than baseline
             "-level", "3.1",         // iPhone compatible
             "-pix_fmt", "yuv420p",
             "-c:a", "aac",           // Re-encode audio for iPhone compatibility
-            "-b:a", "64k",           // Lower audio bitrate = smaller files, faster
+            "-b:a", "64k",           // Sufficient audio bitrate for social media
             "-movflags", "+faststart", // Progressive download support
             "-threads", "2",         // Limit threads to reduce memory usage
-            "-bufsize", "1M",        // Increased buffer (was 512k)
-            "-maxrate", "1.5M",      // Increased max bitrate (was 1M)
+            "-bufsize", "1.5M",      // Buffer sized for 480p output
+            "-maxrate", "2.5M",      // Max bitrate matched to 480p quality
           ])
           .output(outputPath)
           .on("start", (cmd) => {

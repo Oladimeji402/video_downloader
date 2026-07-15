@@ -43,11 +43,13 @@ NODE_OPTIONS=--max-old-space-size=450  # Memory limit for free tier
 ## Performance Settings
 
 Optimized for **512MB RAM free tier hosting**:
-- Resolution: 270p max
+- Resolution: 480p max (balanced quality and speed)
 - FFmpeg preset: faster
+- CRF: 28 (good visual quality)
 - Audio bitrate: 64k
-- Buffer size: 1MB
-- Max video duration: 120 seconds (2 minutes)
+- Buffer size: 1.5MB
+- Max bitrate: 2.5MB
+- Max video duration: 180 seconds (3 minutes)
 - Thread limit: 2
 
 ## File Cleanup
@@ -77,14 +79,14 @@ For paid hosting with 2GB+ RAM, edit `services/processor.js`:
 
 ```javascript
 // Increase resolution
-const maxDimension = 540; // or 720 for HD
+const maxDimension = 720; // or 1080 for Full HD
 
 // Remove duration limit
 // Comment out the duration check
 
 // Better quality preset
 "-preset", "veryfast"  // instead of "faster"
-"-crf", "23"            // instead of "30"
+"-crf", "23"            // instead of "28"
 ```
 
 ## Deployment
