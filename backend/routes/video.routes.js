@@ -104,7 +104,7 @@ router.post("/resolve", async (req, res) => {
  * POST /api/video/upload
  * Handle video file upload
  */
-router.post("/upload", upload.single("file"), (req, res) => {
+router.post("/upload", upload.single("file"), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({
