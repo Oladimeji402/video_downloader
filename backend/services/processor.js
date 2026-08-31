@@ -77,23 +77,31 @@ async function processRender(jobId, videoPath, frameId) {
       throw new Error("No video stream found");
     }
 
+    const audioStream = metadata.streams.find((s) => s.codec_type === "audio");
+    const audioCodec = (audioStream?.codec_name || "").toLowerCase();
+    const canCopyAudio = /^(aac|mp3)$/.test(audioCodec);
+
     let width = videoStream.width;
     let height = videoStream.height;
     const duration = parseFloat(metadata.format.duration) || 0;
     
     logger.info({ jobId, width, height, duration }, "Video dimensions determined");
 
-    // Resolution limit balanced for free-tier hosting (512MB RAM) + social media quality
-    // 480p provides noticeably sharper video than 270p while remaining fast to encode
-    // For higher quality: increase to 540 or 720 (requires more RAM / paid hosting)
-    // For faster processing: decrease to 360 or 270
-    const maxDimension = 540;
-    if (width > maxDimension || height > maxDimension) {
-      const scale = maxDimension / Math.max(width, height);
-      width = Math.round(width * scale / 2) * 2; // Ensure even dimensions
-      height = Math.round(height * scale / 2) * 2;
-      logger.info({ jobId, optimizedWidth: width, optimizedHeight: height }, "Resolution capped at 540p for balanced quality/speed");
+    // Keep native TikTok/Reels 1080x1920. Only downscale 4K+ (long edge > 1920).
+    // Previous 540 cap was applied to the long edge, so vertical videos became ~304x540.
+    const sourceWidth = width;
+    const sourceHeight = height;
+    const maxLongEdge = 1920;
+    if (Math.max(width, height) > maxLongEdge) {
+      const scale = maxLongEdge / Math.max(width, height);
+      width = Math.round((width * scale) / 2) * 2;
+      height = Math.round((height * scale) / 2) * 2;
+      logger.info({ jobId, optimizedWidth: width, optimizedHeight: height }, "Resolution capped at 1080p");
     }
+
+    width = Math.round(width / 2) * 2;
+    height = Math.round(height / 2) * 2;
+    const needsScale = sourceWidth !== width || sourceHeight !== height;
 
     // Duration limit for free tier - prevent extremely long videos that take too long
     const maxDuration = 180; // 3 minutes max for free tier
@@ -107,9 +115,8 @@ async function processRender(jobId, videoPath, frameId) {
     logger.info({ jobId }, "Using direct FFmpeg processing (no Sharp preprocessing)");
     const overlayPath = framePath; // Use frame directly
 
-    // Render with FFmpeg - balanced quality and speed for 480p social media sharing
-    logger.info({ jobId, outputPath }, "Starting FFmpeg encoding");
-    
+    logger.info({ jobId, outputPath, width, height, needsScale, canCopyAudio, audioCodec }, "Starting FFmpeg encoding");
+
     await new Promise((resolve, reject) => {
       try {
         const ffmpegCmd = ffmpeg()
@@ -120,31 +127,38 @@ async function processRender(jobId, videoPath, frameId) {
           throw new Error("Failed to initialize FFmpeg command");
         }
 
+        const overlay = "overlay=0:0:format=auto:eval=init";
+        const filters = needsScale
+          ? [
+              `[0:v]scale=${width}:${height}:flags=lanczos[scaled]`,
+              `[1:v]scale=${width}:${height}:flags=lanczos,format=rgba[frame]`,
+              `[scaled][frame]${overlay},format=yuv420p[out]`,
+            ]
+          : [
+              `[1:v]scale=${width}:${height}:flags=lanczos,format=rgba[frame]`,
+              `[0:v][frame]${overlay},format=yuv420p[out]`,
+            ];
+
+        const audioOptions = canCopyAudio
+          ? ["-c:a", "copy"]
+          : ["-c:a", "aac", "-b:a", "128k", "-ar", "44100"];
+
         ffmpegCmd
-          .complexFilter([
-            // Scale both video and frame, then overlay - all in one pass for speed
-            `[0:v]scale=${width}:${height}:flags=fast_bilinear[scaled]`,
-            `[1:v]scale=${width}:${height}:flags=fast_bilinear,format=rgba[frame]`,
-            "[scaled][frame]overlay=0:0[out]",
-          ])
-          // FFmpeg settings tuned for 480p on free-tier hosting (512MB RAM)
-          // CRF 28 = better quality than 30 with minimal speed impact
-          // maxrate/bufsize increased to match 480p bandwidth needs
+          .complexFilter(filters)
           .outputOptions([
             "-map", "[out]",
             "-map", "0:a?",
             "-c:v", "libx264",
-            "-preset", "faster",     // Good speed/quality balance for free tier
-            "-crf", "28",            // Better quality than 30, still fast to encode
-            "-profile:v", "main",    // Better compression than baseline
-            "-level", "3.1",         // iPhone compatible
+            "-preset", "superfast",
+            "-crf", "20",
+            "-profile:v", "high",
+            "-level", "4.1",
             "-pix_fmt", "yuv420p",
-            "-c:a", "aac",           // Re-encode audio for iPhone compatibility
-            "-b:a", "64k",           // Sufficient audio bitrate for social media
-            "-movflags", "+faststart", // Progressive download support
-            "-threads", "2",         // Limit threads to reduce memory usage
-            "-bufsize", "1.5M",      // Buffer sized for 480p output
-            "-maxrate", "2.5M",      // Max bitrate matched to 480p quality
+            ...audioOptions,
+            "-movflags", "+faststart",
+            "-threads", "2",
+            "-bufsize", "16M",
+            "-maxrate", "8M",
           ])
           .output(outputPath)
           .on("start", (cmd) => {

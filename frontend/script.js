@@ -82,12 +82,12 @@ const VALID_DOMAINS = [
 // Progress & Time Estimation
 // ===========================================
 const PLATFORM_ESTIMATES = {
-  tiktok: { download: 10, render: 8 },
-  instagram: { download: 20, render: 8 },
-  youtube: { download: 15, render: 10 },
-  twitter: { download: 12, render: 8 },
-  facebook: { download: 15, render: 9 },
-  default: { download: 15, render: 10 },
+  tiktok: { download: 6, render: 9 },
+  instagram: { download: 12, render: 9 },
+  youtube: { download: 12, render: 12 },
+  twitter: { download: 8, render: 9 },
+  facebook: { download: 12, render: 9 },
+  default: { download: 10, render: 9 },
 };
 
 const TIPS = [

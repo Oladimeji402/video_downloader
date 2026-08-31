@@ -1,4 +1,3 @@
-import ytdl from "ytdl-core";
 import Queue from "bull";
 import path from "path";
 import fs from "fs";
@@ -9,6 +8,8 @@ import logger from "./logger.js";
 import { isRedisConnected } from "./redis.js";
 import { detectPlatform, parseDownloadError } from "./downloadErrors.js";
 import { getInstagramCookiesPath } from "./cookies.js";
+
+const DOWNLOAD_TIMEOUT_MS = 4 * 60 * 1000;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -72,28 +73,56 @@ export function updateYtDlp() {
 }
 
 function buildYtDlpArgs(outputPath, url) {
+  const platform = detectPlatform(url);
+
+  // Fast path: one already-muxed 1080p MP4 (typical TikTok/Reels) — no ffmpeg merge.
+  // Require both edges >= 1080 so we never pick a 360p/540p "best combined" file.
+  // Fallback merges video+audio when the site only splits streams (YouTube, some IG).
   const args = [
-    "-f", "mp4/best[ext=mp4]/best",
+    "-f", "b[ext=mp4][width>=1080][height>=1080]/bv*[width<=1920][height<=1920]+ba/b[width<=1920][height<=1920]/bv*+ba/b",
+    "-S", "res:1080,codec:h264:m4a,ext:mp4:m4a",
     "--merge-output-format", "mp4",
     "-o", outputPath,
     "--newline",
     "--progress",
     "--no-playlist",
-    "--max-filesize", "200M",
-    "--buffer-size", "16K",
+    "--no-mtime",
     "--no-update",
     "--no-warnings",
+    "--retries", "5",
+    "--fragment-retries", "5",
+    "--concurrent-fragments", "4",
+    "--buffer-size", "1M",
+    "--throttled-rate", "100K",
+    "--socket-timeout", "20",
+    "--max-filesize", "200M",
   ];
 
-  const platform = detectPlatform(url);
-  const cookiesPath = getInstagramCookiesPath();
-
-  if (platform === "instagram" && cookiesPath) {
-    args.push("--cookies", cookiesPath);
+  if (platform === "tiktok") {
+    args.push("--add-header", "Referer:https://www.tiktok.com/");
+    args.push("--add-header", "Origin:https://www.tiktok.com");
+    // Helps non-US hosts see the 1080p format list instead of a single low `play` stream
+    args.push("--xff", "US");
   }
 
-  args.push(url);
+  if (platform === "instagram") {
+    args.push("--add-header", "Referer:https://www.instagram.com/");
+    const cookiesPath = getInstagramCookiesPath();
+    if (cookiesPath) {
+      args.push("--cookies", cookiesPath);
+    }
+  }
+
+  args.push("--", url);
   return args;
+}
+
+function parseYtDlpProgress(chunk, jobData) {
+  if (!jobData) return;
+  const match = chunk.toString().match(/(\d+\.?\d*)%/);
+  if (match) {
+    jobData.progress = Math.min(99, parseFloat(match[1]));
+  }
 }
 
 function setDownloadFailure(jobData, url, stderr) {
@@ -119,59 +148,37 @@ async function processDownload(videoId, url) {
   const jobData = downloadJobs.get(videoId);
 
   try {
-    logger.info({ videoId, url }, "Starting video download");
+    logger.info({ videoId, url, platform: detectPlatform(url) }, "Starting video download");
 
-    // Check if ytdl-core supports this URL (YouTube only)
-    if (ytdl.validateURL(url)) {
-      const videoInfo = await ytdl.getInfo(url);
-      const format = ytdl.chooseFormat(videoInfo.formats, {
-        quality: "highest",
-        filter: (format) => format.container === "mp4",
+    await new Promise((resolve, reject) => {
+      const ytdlp = spawn("yt-dlp", buildYtDlpArgs(outputPath, url));
+
+      let stderr = "";
+      let settled = false;
+
+      const timeout = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        ytdlp.kill("SIGKILL");
+        const parsed = setDownloadFailure(jobData, url, "Download timed out");
+        reject(new Error(parsed.message));
+      }, DOWNLOAD_TIMEOUT_MS);
+
+      const finish = (fn) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        fn();
+      };
+
+      ytdlp.stdout.on("data", (data) => parseYtDlpProgress(data, jobData));
+      ytdlp.stderr.on("data", (data) => {
+        stderr += data.toString();
+        parseYtDlpProgress(data, jobData);
       });
 
-      if (!format) {
-        throw new Error("No suitable video format found");
-      }
-
-      const stream = ytdl(url, { format });
-      const writeStream = fs.createWriteStream(outputPath);
-
-      let downloadedBytes = 0;
-      const totalBytes = parseInt(format.contentLength, 10) || 0;
-
-      stream.on("data", (chunk) => {
-        downloadedBytes += chunk.length;
-        if (totalBytes > 0 && jobData) {
-          jobData.progress = Math.round((downloadedBytes / totalBytes) * 100);
-        }
-      });
-
-      await new Promise((resolve, reject) => {
-        stream.pipe(writeStream);
-        writeStream.on("finish", resolve);
-        writeStream.on("error", reject);
-        stream.on("error", reject);
-      });
-    } else {
-      // Fallback to yt-dlp for non-YouTube URLs (TikTok, Instagram, etc.)
-      await new Promise((resolve, reject) => {
-        const ytdlp = spawn("yt-dlp", buildYtDlpArgs(outputPath, url));
-
-        let stderr = "";
-
-        ytdlp.stdout.on("data", (data) => {
-          const output = data.toString();
-          const progressMatch = output.match(/(\d+\.?\d*)%/);
-          if (progressMatch && jobData) {
-            jobData.progress = parseFloat(progressMatch[1]);
-          }
-        });
-
-        ytdlp.stderr.on("data", (data) => {
-          stderr += data.toString();
-        });
-
-        ytdlp.on("close", (code) => {
+      ytdlp.on("close", (code) => {
+        finish(() => {
           if (code === 0 && fs.existsSync(outputPath)) {
             resolve();
           } else {
@@ -183,13 +190,15 @@ async function processDownload(videoId, url) {
             reject(new Error(parsed.message));
           }
         });
+      });
 
-        ytdlp.on("error", (err) => {
+      ytdlp.on("error", (err) => {
+        finish(() => {
           const parsed = setDownloadFailure(jobData, url, err.message);
           reject(new Error(parsed.message));
         });
       });
-    }
+    });
 
     logger.info({ videoId }, "Download completed");
 
