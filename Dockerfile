@@ -11,6 +11,7 @@ RUN apt-get update && \
     python3 \
     python3-pip \
     && pip3 install --break-system-packages --no-cache-dir --upgrade yt-dlp \
+    && (pip3 install --break-system-packages --no-cache-dir "yt-dlp[curl-cffi]" || echo "curl-cffi optional extra not installed") \
     && yt-dlp --version \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
@@ -41,6 +42,7 @@ EXPOSE 8080
 ENV PORT=8080
 ENV NODE_ENV=production
 ENV NODE_OPTIONS="--max-old-space-size=450"
+ENV PIP_BREAK_SYSTEM_PACKAGES=1
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \

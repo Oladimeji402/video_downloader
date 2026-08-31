@@ -82,6 +82,21 @@ export function parseDownloadError(stderr, platform = null) {
     }
   }
 
+  if (platform === "tiktok" || output.includes("[tiktok]")) {
+    if (
+      output.includes("unable to extract") ||
+      output.includes("webpage video data") ||
+      output.includes("impersonat")
+    ) {
+      return {
+        message: "TikTok blocked this download. Save the video to your phone and upload the file instead.",
+        errorCode: "TIKTOK_EXTRACT_FAILED",
+        suggestUpload: true,
+        platform: "tiktok",
+      };
+    }
+  }
+
   if (output.includes("rate limit") || output.includes("rate-limit") || output.includes("429")) {
     return {
       message: `${platformName} is rate-limiting requests. Wait a few minutes or upload the video file instead.`,
@@ -131,7 +146,7 @@ export function parseDownloadError(stderr, platform = null) {
   return {
     message: `Could not download this ${platformName} video. Try uploading the file instead.`,
     errorCode: "DOWNLOAD_FAILED",
-    suggestUpload: false,
+    suggestUpload: platform === "instagram" || platform === "tiktok",
     platform,
   };
 }

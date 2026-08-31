@@ -520,7 +520,10 @@ function startBackgroundPreRender() {
 
       // Pre-fetch the blob
       const videoRes = await fetch(state.lastRenderedUrl);
-      state.renderedVideoBlob = await videoRes.blob();
+      if (!videoRes.ok) return null;
+      const blob = await videoRes.blob();
+      if (!blob.size) return null;
+      state.renderedVideoBlob = blob;
       return jobId;
     } catch (_) {
       return null;
@@ -576,7 +579,13 @@ async function renderVideoWithFrame(progressCallback) {
 
     if (status.status === "completed") {
       const videoRes = await fetch(`${API_BASE}/video/download/${jobId}`);
+      if (!videoRes.ok) {
+        throw new Error("Framed video was not ready. Tap Download again.");
+      }
       const blob = await videoRes.blob();
+      if (!blob.size) {
+        throw new Error("Framed video was empty. Tap Download again.");
+      }
       state.renderedVideoBlob = blob;
       state.lastRenderedJobId = jobId;
       state.lastRenderedUrl = `${API_BASE}/video/download/${jobId}`;
@@ -807,19 +816,19 @@ function showVideoPreview(sourceLabel) {
   }
 
   const videoUrl = `${API_BASE}/video/preview/${state.videoId}?t=${Date.now()}`;
+  const player = elements.videoPlayer;
 
-  elements.videoPlayer.innerHTML = "";
-  const source = document.createElement("source");
-  source.src = videoUrl;
-  source.type = "video/mp4";
-  elements.videoPlayer.appendChild(source);
-  elements.videoPlayer.setAttribute("playsinline", "true");
-  elements.videoPlayer.setAttribute("webkit-playsinline", "true");
-  elements.videoPlayer.preload = "metadata";
-  elements.videoPlayer.load();
+  player.pause();
+  player.removeAttribute("src");
+  player.innerHTML = "";
+  player.crossOrigin = "anonymous";
+  player.setAttribute("playsinline", "true");
+  player.setAttribute("webkit-playsinline", "true");
+  player.preload = "metadata";
+  player.src = videoUrl;
 
-  elements.videoPlayer.onerror = () => {
-    const error = elements.videoPlayer.error;
+  player.onerror = () => {
+    const error = player.error;
     let msg = "Failed to load video";
     if (error) {
       switch (error.code) {
@@ -830,6 +839,8 @@ function showVideoPreview(sourceLabel) {
     }
     showToast(msg, "error");
   };
+
+  player.load();
 
   elements.previewSection.classList.remove("hidden");
   elements.downloadSection.classList.remove("hidden");

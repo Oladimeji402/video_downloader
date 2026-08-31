@@ -25,6 +25,94 @@ const __dirname = path.dirname(__filename);
 const FRAMES_DIR = path.join(__dirname, "..", "frames");
 const RENDERED_DIR = path.join(__dirname, "..", "temp", "rendered");
 
+function probeFile(filePath) {
+  return new Promise((resolve, reject) => {
+    ffmpeg.ffprobe(filePath, (err, data) => {
+      if (err) reject(err);
+      else resolve(data);
+    });
+  });
+}
+
+function runFfmpeg(build) {
+  return new Promise((resolve, reject) => {
+    const cmd = build();
+    cmd
+      .on("end", resolve)
+      .on("error", reject)
+      .run();
+  });
+}
+
+/**
+ * Make a downloaded/uploaded file playable in Safari/Chrome.
+ * Instagram Reels are often HEVC without faststart — browsers show "Load failed".
+ */
+export async function ensurePlayableMp4(filePath) {
+  if (!filePath || !fs.existsSync(filePath)) {
+    throw new Error("Video file not found");
+  }
+
+  const metadata = await probeFile(filePath);
+  const videoStream = metadata.streams.find((s) => s.codec_type === "video");
+  const audioStream = metadata.streams.find((s) => s.codec_type === "audio");
+  const vcodec = (videoStream?.codec_name || "").toLowerCase();
+  const acodec = (audioStream?.codec_name || "").toLowerCase();
+  const needsTranscode = vcodec !== "h264" || (audioStream && !/^(aac|mp3)$/.test(acodec));
+
+  const tmpPath = `${filePath}.playable.mp4`;
+
+  try {
+    if (!needsTranscode) {
+      logger.info({ vcodec, acodec }, "Remuxing MP4 with faststart for browser playback");
+      await runFfmpeg(() =>
+        ffmpeg(filePath)
+          .outputOptions(["-c", "copy", "-movflags", "+faststart", "-avoid_negative_ts", "make_zero"])
+          .output(tmpPath)
+      );
+    } else {
+      logger.info({ vcodec, acodec }, "Transcoding to H.264/AAC for browser playback");
+      await runFfmpeg(() =>
+        ffmpeg(filePath)
+          .outputOptions([
+            "-c:v", "libx264",
+            "-preset", "ultrafast",
+            "-crf", "20",
+            "-profile:v", "high",
+            "-level", "4.1",
+            "-pix_fmt", "yuv420p",
+            "-c:a", "aac",
+            "-b:a", "128k",
+            "-ar", "44100",
+            "-movflags", "+faststart",
+            "-threads", "2",
+          ])
+          .output(tmpPath)
+      );
+    }
+
+    if (!fs.existsSync(tmpPath) || fs.statSync(tmpPath).size === 0) {
+      throw new Error("Normalized video is empty");
+    }
+
+    fs.renameSync(tmpPath, filePath);
+    logger.info({ filePath, transcoded: needsTranscode }, "Video is ready for preview");
+  } catch (err) {
+    try {
+      if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+    } catch {
+      // ignore cleanup errors
+    }
+
+    if (!needsTranscode) {
+      logger.warn({ error: err.message }, "Faststart remux failed, leaving original file");
+      return;
+    }
+
+    throw err;
+  }
+}
+
 // Ensure rendered directory exists
 if (!fs.existsSync(RENDERED_DIR)) {
   fs.mkdirSync(RENDERED_DIR, { recursive: true });
@@ -39,7 +127,7 @@ let renderQueue = null;
 /**
  * Process render directly (without queue) - used as fallback
  */
-async function processRender(jobId, videoPath, frameId) {
+async function processRender(jobId, videoPath, frameId, { maxLongEdge = 1920 } = {}) {
   const outputPath = path.join(RENDERED_DIR, `${jobId}.mp4`);
   const jobData = renderJobs.get(jobId);
 
@@ -79,7 +167,6 @@ async function processRender(jobId, videoPath, frameId) {
 
     const audioStream = metadata.streams.find((s) => s.codec_type === "audio");
     const audioCodec = (audioStream?.codec_name || "").toLowerCase();
-    const canCopyAudio = /^(aac|mp3)$/.test(audioCodec);
 
     let width = videoStream.width;
     let height = videoStream.height;
@@ -91,12 +178,11 @@ async function processRender(jobId, videoPath, frameId) {
     // Previous 540 cap was applied to the long edge, so vertical videos became ~304x540.
     const sourceWidth = width;
     const sourceHeight = height;
-    const maxLongEdge = 1920;
     if (Math.max(width, height) > maxLongEdge) {
       const scale = maxLongEdge / Math.max(width, height);
       width = Math.round((width * scale) / 2) * 2;
       height = Math.round((height * scale) / 2) * 2;
-      logger.info({ jobId, optimizedWidth: width, optimizedHeight: height }, "Resolution capped at 1080p");
+      logger.info({ jobId, optimizedWidth: width, optimizedHeight: height, maxLongEdge }, "Resolution capped");
     }
 
     width = Math.round(width / 2) * 2;
@@ -115,7 +201,7 @@ async function processRender(jobId, videoPath, frameId) {
     logger.info({ jobId }, "Using direct FFmpeg processing (no Sharp preprocessing)");
     const overlayPath = framePath; // Use frame directly
 
-    logger.info({ jobId, outputPath, width, height, needsScale, canCopyAudio, audioCodec }, "Starting FFmpeg encoding");
+    logger.info({ jobId, outputPath, width, height, needsScale, audioCodec, maxLongEdge }, "Starting FFmpeg encoding");
 
     await new Promise((resolve, reject) => {
       try {
@@ -139,9 +225,7 @@ async function processRender(jobId, videoPath, frameId) {
               `[0:v][frame]${overlay},format=yuv420p[out]`,
             ];
 
-        const audioOptions = canCopyAudio
-          ? ["-c:a", "copy"]
-          : ["-c:a", "aac", "-b:a", "128k", "-ar", "44100"];
+        const audioOptions = ["-c:a", "aac", "-b:a", "128k", "-ar", "44100"];
 
         ffmpegCmd
           .complexFilter(filters)
@@ -200,6 +284,11 @@ async function processRender(jobId, videoPath, frameId) {
 
     return { jobId, status: "completed", outputPath };
   } catch (err) {
+    if (maxLongEdge > 1280 && !String(err.message).includes("too long")) {
+      logger.warn({ jobId, error: err.message }, "1080p render failed, retrying at 720p");
+      return processRender(jobId, videoPath, frameId, { maxLongEdge: 1280 });
+    }
+
     logger.error({ jobId, error: err.message }, "Render failed");
 
     if (jobData) {
@@ -470,4 +559,5 @@ export default {
   getRenderedVideoPath,
   cleanupOldRenders,
   closeRenderQueue,
+  ensurePlayableMp4,
 };

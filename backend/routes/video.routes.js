@@ -113,7 +113,7 @@ router.post("/upload", upload.single("file"), (req, res) => {
       });
     }
 
-    const result = downloader.handleUploadedFile(req.file);
+    const result = await downloader.handleUploadedFile(req.file);
 
     if (result.error) {
       return res.status(400).json({
@@ -223,6 +223,7 @@ router.get("/preview/:videoId", (req, res) => {
       "Cache-Control": "no-cache, no-store, must-revalidate",
       "Pragma": "no-cache",
       "Expires": "0",
+      "Cross-Origin-Resource-Policy": "cross-origin",
     };
 
     if (range) {

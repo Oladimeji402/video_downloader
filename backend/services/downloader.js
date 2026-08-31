@@ -8,6 +8,7 @@ import logger from "./logger.js";
 import { isRedisConnected } from "./redis.js";
 import { detectPlatform, parseDownloadError } from "./downloadErrors.js";
 import { getInstagramCookiesPath } from "./cookies.js";
+import { ensurePlayableMp4 } from "./processor.js";
 
 const DOWNLOAD_TIMEOUT_MS = 4 * 60 * 1000;
 
@@ -27,59 +28,76 @@ const downloadJobs = new Map();
 // Bull queue for download jobs
 let downloadQueue = null;
 
+function runExec(cmd, args, timeoutMs = 60_000) {
+  return new Promise((resolve) => {
+    const proc = execFile(cmd, args, { timeout: timeoutMs }, (err, stdout, stderr) => {
+      if (err) {
+        resolve({ ok: false, output: (stderr || stdout || err.message).toString().trim() });
+      } else {
+        resolve({ ok: true, output: (stdout || "").toString().trim() });
+      }
+    });
+    proc.on("error", () => resolve({ ok: false, output: "command not found" }));
+  });
+}
+
+function logYtDlpVersion() {
+  execFile("yt-dlp", ["--version"], { timeout: 10_000 }, (err, stdout, stderr) => {
+    if (err) {
+      logger.warn({ error: stderr || err.message }, "yt-dlp is not available");
+      return;
+    }
+    logger.info({ version: stdout.trim() }, "yt-dlp version");
+  });
+}
+
 /**
  * Attempt to self-update yt-dlp via pip at startup.
  * Runs fire-and-forget — a failure here is non-fatal.
  */
 export function updateYtDlp() {
-  // Only run in production (skip in local dev to save time)
+  logYtDlpVersion();
+
   if (process.env.NODE_ENV !== "production") {
     logger.info("Skipping yt-dlp auto-update in non-production environment");
     return;
   }
 
   logger.info("Attempting yt-dlp self-update via pip...");
+  process.env.PIP_BREAK_SYSTEM_PACKAGES = "1";
 
-  // Try pip3 first, fall back to pip
-  const tryUpdate = (cmd, args) => {
-    return new Promise((resolve) => {
-      const proc = execFile(cmd, args, { timeout: 60_000 }, (err, stdout, stderr) => {
-        if (err) {
-          resolve({ ok: false, output: stderr || err.message });
-        } else {
-          resolve({ ok: true, output: stdout });
-        }
-      });
-      proc.on("error", () => resolve({ ok: false, output: "command not found" }));
-    });
-  };
+  const pipArgs = [
+    "install",
+    "--upgrade",
+    "--no-cache-dir",
+    "--break-system-packages",
+    "yt-dlp[default,curl-cffi]",
+  ];
 
   (async () => {
-    // First try: pip3 upgrade
-    let result = await tryUpdate("pip3", ["install", "--upgrade", "--no-cache-dir", "yt-dlp"]);
-
+    let result = await runExec("pip3", pipArgs);
     if (!result.ok) {
-      // Second try: pip
-      result = await tryUpdate("pip", ["install", "--upgrade", "--no-cache-dir", "yt-dlp"]);
+      result = await runExec("pip", pipArgs);
     }
 
     if (result.ok) {
-      logger.info("yt-dlp updated successfully");
+      logger.info({ output: result.output.slice(0, 500) }, "yt-dlp updated successfully");
+      logYtDlpVersion();
     } else {
-      // Not fatal — deployed image may already be recent enough, or pip unavailable
       logger.warn({ output: result.output }, "yt-dlp auto-update failed (non-fatal)");
     }
   })();
 }
 
-function buildYtDlpArgs(outputPath, url) {
-  const platform = detectPlatform(url);
+function instagramCookieArgs() {
+  const cookiesPath = getInstagramCookiesPath();
+  return cookiesPath ? ["--cookies", cookiesPath] : [];
+}
 
-  // Fast path: one already-muxed 1080p MP4 (typical TikTok/Reels) — no ffmpeg merge.
-  // Require both edges >= 1080 so we never pick a 360p/540p "best combined" file.
-  // Fallback merges video+audio when the site only splits streams (YouTube, some IG).
+function buildYtDlpArgs(outputPath, url, { impersonate = true } = {}) {
+  // Prefer 1080p H.264 MP4. Do not require 1080x1080 — TikTok often serves 720x1280.
   const args = [
-    "-f", "b[ext=mp4][width>=1080][height>=1080]/bv*[width<=1920][height<=1920]+ba/b[width<=1920][height<=1920]/bv*+ba/b",
+    "-f", "bv*[width<=1920][height<=1920]+ba/b[width<=1920][height<=1920]/bv*+ba/b",
     "-S", "res:1080,codec:h264:m4a,ext:mp4:m4a",
     "--merge-output-format", "mp4",
     "-o", outputPath,
@@ -88,29 +106,44 @@ function buildYtDlpArgs(outputPath, url) {
     "--no-playlist",
     "--no-mtime",
     "--no-update",
-    "--no-warnings",
     "--retries", "5",
     "--fragment-retries", "5",
     "--concurrent-fragments", "4",
     "--buffer-size", "1M",
-    "--throttled-rate", "100K",
     "--socket-timeout", "20",
     "--max-filesize", "200M",
   ];
 
-  if (platform === "tiktok") {
-    args.push("--add-header", "Referer:https://www.tiktok.com/");
-    args.push("--add-header", "Origin:https://www.tiktok.com");
-    // Helps non-US hosts see the 1080p format list instead of a single low `play` stream
-    args.push("--xff", "US");
+  const platform = detectPlatform(url);
+
+  // TikTok's extractor needs TLS impersonation (curl_cffi). Skip unknown flags like --xff.
+  if (impersonate && (platform === "tiktok" || platform === "instagram")) {
+    args.push("--impersonate", "chrome");
   }
 
   if (platform === "instagram") {
-    args.push("--add-header", "Referer:https://www.instagram.com/");
-    const cookiesPath = getInstagramCookiesPath();
-    if (cookiesPath) {
-      args.push("--cookies", cookiesPath);
-    }
+    args.push(...instagramCookieArgs());
+  }
+
+  args.push("--", url);
+  return args;
+}
+
+function buildYtDlpFallbackArgs(outputPath, url) {
+  const args = [
+    "-f", "b/bv*+ba/b",
+    "--merge-output-format", "mp4",
+    "-o", outputPath,
+    "--no-playlist",
+    "--no-mtime",
+    "--no-update",
+    "--retries", "3",
+    "--socket-timeout", "20",
+    "--max-filesize", "200M",
+  ];
+
+  if (detectPlatform(url) === "instagram") {
+    args.push(...instagramCookieArgs());
   }
 
   args.push("--", url);
@@ -140,65 +173,79 @@ function setDownloadFailure(jobData, url, stderr) {
   return parsed;
 }
 
+function spawnYtDlp(args, jobData) {
+  return new Promise((resolve, reject) => {
+    const ytdlp = spawn("yt-dlp", args);
+    let stderr = "";
+    let stdout = "";
+    let settled = false;
+
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      ytdlp.kill("SIGKILL");
+      reject(new Error("Download timed out"));
+    }, DOWNLOAD_TIMEOUT_MS);
+
+    const finish = (fn) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      fn();
+    };
+
+    ytdlp.stdout.on("data", (data) => {
+      stdout += data.toString();
+      parseYtDlpProgress(data, jobData);
+    });
+    ytdlp.stderr.on("data", (data) => {
+      stderr += data.toString();
+      parseYtDlpProgress(data, jobData);
+    });
+
+    ytdlp.on("close", (code) => {
+      finish(() => {
+        const output = `${stdout}\n${stderr}`.trim();
+        if (code === 0) {
+          resolve({ output });
+        } else {
+          reject(new Error(output || `yt-dlp exited with code ${code}`));
+        }
+      });
+    });
+
+    ytdlp.on("error", (err) => {
+      finish(() => reject(err));
+    });
+  });
+}
+
 /**
  * Download video directly (without queue) - used as fallback
  */
 async function processDownload(videoId, url) {
   const outputPath = path.join(DOWNLOADS_DIR, `${videoId}.mp4`);
   const jobData = downloadJobs.get(videoId);
+  const platform = detectPlatform(url);
 
   try {
-    logger.info({ videoId, url, platform: detectPlatform(url) }, "Starting video download");
+    logger.info({ videoId, url, platform }, "Starting video download");
 
-    await new Promise((resolve, reject) => {
-      const ytdlp = spawn("yt-dlp", buildYtDlpArgs(outputPath, url));
+    try {
+      await spawnYtDlp(buildYtDlpArgs(outputPath, url), jobData);
+    } catch (firstErr) {
+      logger.warn(
+        { videoId, platform, stderr: String(firstErr.message).slice(-2000) },
+        "yt-dlp primary download failed, retrying with compatible flags"
+      );
+      await spawnYtDlp(buildYtDlpFallbackArgs(outputPath, url), jobData);
+    }
 
-      let stderr = "";
-      let settled = false;
+    if (!fs.existsSync(outputPath)) {
+      throw new Error("yt-dlp finished but output file is missing");
+    }
 
-      const timeout = setTimeout(() => {
-        if (settled) return;
-        settled = true;
-        ytdlp.kill("SIGKILL");
-        const parsed = setDownloadFailure(jobData, url, "Download timed out");
-        reject(new Error(parsed.message));
-      }, DOWNLOAD_TIMEOUT_MS);
-
-      const finish = (fn) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timeout);
-        fn();
-      };
-
-      ytdlp.stdout.on("data", (data) => parseYtDlpProgress(data, jobData));
-      ytdlp.stderr.on("data", (data) => {
-        stderr += data.toString();
-        parseYtDlpProgress(data, jobData);
-      });
-
-      ytdlp.on("close", (code) => {
-        finish(() => {
-          if (code === 0 && fs.existsSync(outputPath)) {
-            resolve();
-          } else {
-            const parsed = setDownloadFailure(jobData, url, stderr);
-            logger.error(
-              { videoId, platform: parsed.platform, errorCode: parsed.errorCode },
-              "yt-dlp download failed"
-            );
-            reject(new Error(parsed.message));
-          }
-        });
-      });
-
-      ytdlp.on("error", (err) => {
-        finish(() => {
-          const parsed = setDownloadFailure(jobData, url, err.message);
-          reject(new Error(parsed.message));
-        });
-      });
-    });
+    await ensurePlayableMp4(outputPath);
 
     logger.info({ videoId }, "Download completed");
 
@@ -209,14 +256,14 @@ async function processDownload(videoId, url) {
 
     return { videoId, status: "completed", outputPath };
   } catch (err) {
-    logger.error({ videoId, error: err.message }, "Download failed");
+    const stderr = err.message || "";
+    const parsed = setDownloadFailure(jobData, url, stderr);
+    logger.error(
+      { videoId, platform: parsed.platform, errorCode: parsed.errorCode, stderr: stderr.slice(-2000) },
+      "yt-dlp download failed"
+    );
 
-    if (jobData && jobData.status !== "failed") {
-      const parsed = setDownloadFailure(jobData, url, err.message);
-      throw new Error(parsed.message);
-    }
-
-    throw err;
+    throw new Error(parsed.message);
   }
 }
 
@@ -337,7 +384,7 @@ export function getVideoPath(videoId) {
  * @param {object} file - Multer file object
  * @returns {object} - Job info with videoId
  */
-export function handleUploadedFile(file) {
+export async function handleUploadedFile(file) {
   if (!file) {
     return { error: "No file provided" };
   }
@@ -356,6 +403,14 @@ export function handleUploadedFile(file) {
   // Copy uploaded file to outputs directory
   try {
     fs.copyFileSync(file.path, outputPath);
+
+    try {
+      fs.unlinkSync(file.path);
+    } catch (err) {
+      logger.error({ error: err.message }, "Failed to delete temp file");
+    }
+
+    await ensurePlayableMp4(outputPath);
     
     const job = {
       videoId,
@@ -368,13 +423,6 @@ export function handleUploadedFile(file) {
     };
 
     downloadJobs.set(videoId, job);
-
-    // Clean up the temp multer file
-    try {
-      fs.unlinkSync(file.path);
-    } catch (err) {
-      logger.error({ error: err.message }, "Failed to delete temp file");
-    }
 
     logger.info({ videoId, outputPath }, "File uploaded successfully");
     return { videoId, status: "completed" };
